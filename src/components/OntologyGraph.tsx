@@ -30,6 +30,7 @@ import {
   restoreGraphViewport,
   type GraphPositionSnapshot,
 } from '../lib/graphPositionPersistence';
+import { GraphLegend } from './GraphLegend';
 import { LargeGraphControls } from './LargeGraphControls';
 import { useGraphNodeActionPosition } from './useGraphNodeActionPosition';
 
@@ -1099,20 +1100,7 @@ export function OntologyGraph() {
       </div>
 
       {!isBoundedView && (
-        <div className="graph-legend">
-          <div className="legend-title">Entity Types</div>
-          {legendEntities.map(entity => (
-            <div key={entity.id} className="legend-item">
-              <div className="legend-dot" style={{ backgroundColor: entity.color }} />
-              <span>{entity.icon} {entity.name}</span>
-            </div>
-          ))}
-          {hiddenLegendCount > 0 && (
-            <div className="legend-item">
-              <span>+ {hiddenLegendCount} more visible in the graph</span>
-            </div>
-          )}
-        </div>
+        <GraphLegend entityTypes={legendEntities} />
       )}
     </div>
   );
