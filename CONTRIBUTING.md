@@ -42,6 +42,10 @@ The easiest way to contribute is to add an ontology to the community catalogue:
    ```
    catalogue/community/<your-github-username>/<ontology-slug>/
    ```
+   Every directory name must contain only lowercase letters, numbers, hyphens,
+   or underscores. The catalogue build rejects unsafe directory names and
+   symlinks instead of silently skipping them. Regular files alongside
+   catalogue directories are ignored so tier-level documentation is allowed.
 3. Add two files:
    - **`<ontology-slug>.rdf`** — your ontology in RDF/OWL format (you can
      export from the Ontology Playground UI)

@@ -7,7 +7,8 @@
  * Usage: npx tsx scripts/compile-catalogue.ts
  */
 import { readFileSync, writeFileSync, existsSync, readdirSync, lstatSync } from 'node:fs';
-import { join, basename } from 'node:path';
+import { join, basename, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { JSDOM } from 'jsdom';
 import { parseRDF } from '../src/lib/rdf/parser.js';
 import { serializeToRDF } from '../src/lib/rdf/serializer.js';
@@ -105,20 +106,32 @@ function validateMetadata(
 // Validate that a directory name is a safe slug (no traversal, no special chars)
 const SAFE_SLUG_RE = /^[a-z0-9][a-z0-9\-_]*[a-z0-9]$|^[a-z0-9]$/;
 
-function discoverOntologyDirs(baseDir: string): string[] {
+export class CatalogueDiscoveryError extends Error {
+  constructor(path: string, reason: string) {
+    super(`${path}: ${reason}`);
+    this.name = 'CatalogueDiscoveryError';
+  }
+}
+
+export function discoverOntologyDirs(baseDir: string): string[] {
   const dirs: string[] = [];
   if (!existsSync(baseDir)) return dirs;
   for (const entry of readdirSync(baseDir)) {
     const full = join(baseDir, entry);
     const stat = lstatSync(full);
     if (stat.isSymbolicLink()) {
-      console.error(`✘ ${baseDir}/${entry}: symlinks are not allowed in the catalogue`);
-      continue;
+      throw new CatalogueDiscoveryError(
+        full,
+        'symlinks are not allowed in the catalogue',
+      );
     }
+    // Regular files may hold tier-level documentation and are not catalogue entries.
     if (!stat.isDirectory()) continue;
     if (!SAFE_SLUG_RE.test(entry)) {
-      console.error(`✘ ${baseDir}/${entry}: directory name contains unsafe characters (only lowercase alphanumeric, hyphens, underscores allowed)`);
-      continue;
+      throw new CatalogueDiscoveryError(
+        full,
+        'directory name contains unsafe characters (only lowercase alphanumeric, hyphens, underscores allowed)',
+      );
     }
     dirs.push(full);
   }
@@ -129,13 +142,15 @@ function discoverOntologyDirs(baseDir: string): string[] {
 // Main
 // ------------------------------------------------------------------
 
-function compile(): Catalogue {
+export function compileCatalogue(
+  catalogueDir: string = CATALOGUE_DIR,
+): Catalogue {
   const entries: CatalogueEntry[] = [];
   const seenIds = new Set<string>();
   let errors = 0;
 
   for (const tier of ['official', 'community', 'external'] as const) {
-    const tierDir = join(CATALOGUE_DIR, tier);
+    const tierDir = join(catalogueDir, tier);
     // For community and external, ontologies are nested one level deeper:
     // community/<user>/<slug>/  or  external/<source-name>/<slug>/
     const ontologyDirs: { dir: string; source: typeof tier }[] = [];
@@ -264,15 +279,29 @@ function compile(): Catalogue {
   };
 }
 
+export function runCatalogueCompiler(
+  catalogueDir: string = CATALOGUE_DIR,
+  outputPath: string = OUTPUT_PATH,
+): Catalogue {
+  const catalogue = compileCatalogue(catalogueDir);
+  writeFileSync(outputPath, JSON.stringify(catalogue, null, 2) + '\n', 'utf-8');
+  console.log(`\n✔ Wrote ${catalogue.count} entries to ${outputPath}`);
+  return catalogue;
+}
+
 // ------------------------------------------------------------------
 // Run
 // ------------------------------------------------------------------
 
-try {
-  const catalogue = compile();
-  writeFileSync(OUTPUT_PATH, JSON.stringify(catalogue, null, 2) + '\n', 'utf-8');
-  console.log(`\n✔ Wrote ${catalogue.count} entries to ${OUTPUT_PATH}`);
-} catch (e) {
-  console.error(`\n${(e as Error).message}`);
-  process.exit(1);
+const isMainModule =
+  process.argv[1] !== undefined
+  && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
+
+if (isMainModule) {
+  try {
+    runCatalogueCompiler();
+  } catch (e) {
+    console.error(`\n${(e as Error).message}`);
+    process.exitCode = 1;
+  }
 }

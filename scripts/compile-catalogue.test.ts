@@ -1,9 +1,25 @@
-import { describe, it, expect } from 'vitest';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, dirname, join } from 'node:path';
 import { execSync } from 'node:child_process';
 import { serializeToRDF } from '../src/lib/rdf/serializer';
 import { parseRDF } from '../src/lib/rdf/parser';
+import {
+  CatalogueDiscoveryError,
+  discoverOntologyDirs,
+  runCatalogueCompiler,
+} from './compile-catalogue';
 
 const ROOT = join(import.meta.dirname, '..');
 const CATALOGUE_JSON = join(ROOT, 'public', 'catalogue.json');
@@ -42,6 +58,44 @@ function findEntry(id: string): CatalogueTestEntry {
   expect(entry).toBeTruthy();
   return entry as CatalogueTestEntry;
 }
+
+const temporaryDirectories: string[] = [];
+
+function createTemporaryCatalogue(): string {
+  const root = mkdtempSync(join(tmpdir(), 'ontology-catalogue-test-'));
+  temporaryDirectories.push(root);
+
+  for (const tier of ['official', 'community', 'external']) {
+    mkdirSync(join(root, tier));
+  }
+
+  return root;
+}
+
+function createDirectory(root: string, relativePath: string): string {
+  const path = join(root, relativePath);
+  mkdirSync(path, { recursive: true });
+  return path;
+}
+
+function createDirectorySymlink(root: string, relativePath: string): string {
+  const target = createDirectory(
+    root,
+    `symlink-targets/${relativePath.replaceAll('/', '-')}`,
+  );
+  const path = join(root, relativePath);
+  mkdirSync(dirname(path), { recursive: true });
+  symlinkSync(target, path, process.platform === 'win32' ? 'junction' : 'dir');
+  return path;
+}
+
+afterEach(() => {
+  for (const directory of temporaryDirectories.splice(0)) {
+    if (existsSync(directory)) {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+});
 
 describe('catalogue compilation (end-to-end)', () => {
   it('npm run catalogue:build succeeds with the real catalogue', () => {
@@ -89,6 +143,84 @@ describe('catalogue compilation (end-to-end)', () => {
       expect(reparsed.ontology.entityTypes.length).toBe(entry.ontology.entityTypes.length);
       expect(reparsed.ontology.relationships.length).toBe(entry.ontology.relationships.length);
     }
+  });
+});
+
+describe('catalogue directory discovery', () => {
+  it('returns safe directory names and ignores incidental regular files', () => {
+    const root = createTemporaryCatalogue();
+    const tierDir = join(root, 'official');
+    const safeDirectories = ['a', 'alpha-1', 'alpha_beta'];
+
+    for (const name of safeDirectories) {
+      createDirectory(tierDir, name);
+    }
+    writeFileSync(join(tierDir, 'README.md'), 'Tier documentation\n');
+
+    expect(discoverOntologyDirs(tierDir).map((path) => basename(path)).sort()).toEqual(
+      safeDirectories.sort(),
+    );
+  });
+
+  it.each([
+    'Uppercase',
+    'with space',
+    '..-traversal-like',
+    'contains.dot',
+    'percent%encoded',
+  ])('rejects the unsafe directory name %s', (name) => {
+    const root = createTemporaryCatalogue();
+    const tierDir = join(root, 'official');
+    const path = createDirectory(tierDir, name);
+
+    expect(() => discoverOntologyDirs(tierDir)).toThrow(CatalogueDiscoveryError);
+    expect(() => discoverOntologyDirs(tierDir)).toThrow(
+      `${path}: directory name contains unsafe characters`,
+    );
+  });
+});
+
+describe('catalogue discovery failures', () => {
+  it.each([
+    'official/Unsafe-ontology',
+    'community/Unsafe-user',
+    'community/alice/Unsafe-ontology',
+    'external/Unsafe-source',
+    'external/schema-org/Unsafe-ontology',
+  ])('fails for an unsafe directory at %s and preserves existing output', (relativePath) => {
+    const root = createTemporaryCatalogue();
+    const invalidPath = createDirectory(root, relativePath);
+    const outputPath = join(root, 'catalogue.json');
+    writeFileSync(outputPath, 'previous valid catalogue\n');
+
+    expect(() => runCatalogueCompiler(root, outputPath)).toThrow(
+      CatalogueDiscoveryError,
+    );
+    expect(() => runCatalogueCompiler(root, outputPath)).toThrow(
+      `${invalidPath}: directory name contains unsafe characters`,
+    );
+    expect(readFileSync(outputPath, 'utf-8')).toBe('previous valid catalogue\n');
+  });
+
+  it.each([
+    'official/symlink',
+    'community/symlink',
+    'community/alice/symlink',
+    'external/symlink',
+    'external/schema-org/symlink',
+  ])('fails for a symlink at %s and preserves existing output', (relativePath) => {
+    const root = createTemporaryCatalogue();
+    const symlinkPath = createDirectorySymlink(root, relativePath);
+    const outputPath = join(root, 'catalogue.json');
+    writeFileSync(outputPath, 'previous valid catalogue\n');
+
+    expect(() => runCatalogueCompiler(root, outputPath)).toThrow(
+      CatalogueDiscoveryError,
+    );
+    expect(() => runCatalogueCompiler(root, outputPath)).toThrow(
+      `${symlinkPath}: symlinks are not allowed in the catalogue`,
+    );
+    expect(readFileSync(outputPath, 'utf-8')).toBe('previous valid catalogue\n');
   });
 });
 
