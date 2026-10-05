@@ -74,6 +74,25 @@ describe('ImportExportModal integration', () => {
     useAppStore.getState().resetToDefault();
   });
 
+  it('offers distinct Playground and OWL plus SHACL export profiles', async () => {
+    render(<ImportExportModal onClose={onClose} />);
+
+    const playgroundProfile = screen.getByRole('button', {
+      name: /Playground round-trip/,
+    });
+    const standardsProfile = screen.getByRole('button', {
+      name: /OWL \+ SHACL interoperability/,
+    });
+
+    expect(playgroundProfile.getAttribute('aria-pressed')).toBe('true');
+    expect(standardsProfile.getAttribute('aria-pressed')).toBe('false');
+
+    await userEvent.click(standardsProfile);
+
+    expect(playgroundProfile.getAttribute('aria-pressed')).toBe('false');
+    expect(standardsProfile.getAttribute('aria-pressed')).toBe('true');
+  });
+
   it('imports a valid RDF file and updates the store', async () => {
     const rdfContent = serializeToRDF(testOntology);
     const file = createRdfFile(rdfContent);

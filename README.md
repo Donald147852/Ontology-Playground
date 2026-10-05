@@ -47,15 +47,19 @@ and export to RDF/XML or JSON.
 ### RDF Import & Export
 
 Import and export the Playground's supported RDF/XML subset: OWL classes,
-datatype properties, object properties with cardinalities, and internal
-`rdfs:subClassOf` hierarchies. The importer accepts typed elements and the
-equivalent `rdf:Description` / `rdf:type` syntax. Export in the format Microsoft
-Fabric IQ expects, with automated round-trip tests for Playground-generated
-RDF. Imported class hierarchies remain `rdfs:subClassOf` statements on export
-and are not misrepresented as Fabric relationship types. Large graphs
-automatically use a fast grid layout and bounded UI lists instead of running an
-expensive force layout over every element. Turtle input is not currently
-supported.
+datatype properties, object properties, and internal `rdfs:subClassOf`
+hierarchies. The importer accepts typed elements and the equivalent
+`rdf:Description` / `rdf:type` syntax. Exports can use either the lossless
+Playground round-trip profile or a standards-oriented OWL + SHACL profile. The
+standards profile represents property order, enums, identifiers, relationship
+cardinality, and relationship attributes with interoperable vocabulary instead
+of treating Playground metadata as Fabric vocabulary. Imported class
+hierarchies remain `rdfs:subClassOf` statements on export and are not
+misrepresented as Fabric relationship types. Large graphs automatically use a
+fast grid layout and bounded UI lists instead of running an expensive force
+layout over every element. Turtle input is not currently supported. See the
+[RDF export profiles guide](docs/rdf-export-profiles.md) for the exact
+contracts and limitations.
 
 ### One-Click Catalogue PR
 

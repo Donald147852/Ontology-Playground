@@ -206,6 +206,138 @@ function getTypedElements(
   return results;
 }
 
+function getRdfAttribute(element: Element, localName: string): string | null {
+  return (
+    element.getAttribute(`rdf:${localName}`)
+    || element.getAttributeNS(RDF_NS, localName)
+  );
+}
+
+function getDirectChild(parent: Element, localName: string): Element | null {
+  for (let i = 0; i < parent.children.length; i++) {
+    const child = parent.children[i];
+    const childLocal = child.localName || child.tagName.split(':').pop();
+    if (childLocal === localName) return child;
+  }
+  return null;
+}
+
+function getCollectionResources(parent: Element, localName: string): string[] {
+  const collection = getDirectChild(parent, localName);
+  if (!collection) return [];
+
+  const resources: string[] = [];
+  for (let i = 0; i < collection.children.length; i++) {
+    const resource = getRdfAttribute(collection.children[i], 'about');
+    if (resource) resources.push(resource);
+  }
+  return resources;
+}
+
+interface ShaclPathMetadata {
+  enumValues?: string[];
+  forwardMaxOne: boolean;
+  hasForwardShape: boolean;
+  hasInverseShape: boolean;
+  inverseMaxOne: boolean;
+  order?: number;
+}
+
+function parseRdfLiteralLists(root: Element): Map<string, string[]> {
+  const listNodes = new Map<string, Element>();
+  const descriptions = root.getElementsByTagNameNS(RDF_NS, 'Description');
+  for (let i = 0; i < descriptions.length; i++) {
+    const nodeId = getRdfAttribute(descriptions[i], 'nodeID');
+    if (nodeId) listNodes.set(nodeId, descriptions[i]);
+  }
+
+  const lists = new Map<string, string[]>();
+  for (const startNodeId of listNodes.keys()) {
+    const values: string[] = [];
+    const visited = new Set<string>();
+    let nodeId: string | null = startNodeId;
+
+    while (nodeId && !visited.has(nodeId)) {
+      visited.add(nodeId);
+      const node = listNodes.get(nodeId);
+      if (!node) break;
+
+      const first = getDirectChild(node, 'first');
+      if (first?.textContent !== null && first?.textContent !== undefined) {
+        values.push(first.textContent);
+      }
+
+      const rest = getDirectChild(node, 'rest');
+      if (!rest) break;
+      const restResource = getRdfAttribute(rest, 'resource');
+      if (restResource === `${RDF_NS}nil`) break;
+      nodeId = getRdfAttribute(rest, 'nodeID');
+    }
+
+    if (values.length > 0) lists.set(startNodeId, values);
+  }
+  return lists;
+}
+
+function parseShaclPathMetadata(
+  root: Element,
+  descriptionTypeIndex: Map<string, Element[]>,
+): Map<string, ShaclPathMetadata> {
+  const metadataByPath = new Map<string, ShaclPathMetadata>();
+  const lists = parseRdfLiteralLists(root);
+  const propertyShapes = getTypedElements(
+    root,
+    SHACL_NS,
+    'PropertyShape',
+    descriptionTypeIndex,
+  );
+
+  for (const shape of propertyShapes) {
+    const path = getDirectChild(shape, 'path');
+    if (!path) continue;
+
+    let pathUri = getRdfAttribute(path, 'resource');
+    let inverse = false;
+    if (!pathUri) {
+      const inversePath = getDirectChild(path, 'inversePath');
+      pathUri = inversePath ? getRdfAttribute(inversePath, 'resource') : null;
+      inverse = Boolean(pathUri);
+    }
+    if (!pathUri) continue;
+
+    const metadata = metadataByPath.get(pathUri) ?? {
+      forwardMaxOne: false,
+      hasForwardShape: false,
+      hasInverseShape: false,
+      inverseMaxOne: false,
+    };
+    const maxCount = Number(getChildText(shape, 'maxCount', SHACL_NS));
+
+    if (inverse) {
+      metadata.hasInverseShape = true;
+      metadata.inverseMaxOne ||= maxCount === 1;
+    } else {
+      metadata.hasForwardShape = true;
+      metadata.forwardMaxOne ||= maxCount === 1;
+
+      const orderText = getChildText(shape, 'order', SHACL_NS);
+      if (orderText !== null && Number.isFinite(Number(orderText))) {
+        metadata.order = Number(orderText);
+      }
+
+      const inList = getDirectChild(shape, 'in');
+      const listNodeId = inList ? getRdfAttribute(inList, 'nodeID') : null;
+      if (listNodeId && lists.has(listNodeId)) {
+        metadata.enumValues = lists.get(listNodeId);
+      }
+    }
+
+    metadataByPath.set(pathUri, metadata);
+  }
+
+  return metadataByPath;
+}
+
 interface ParsedDatatypeProperty {
   about: string;
   label: string;
@@ -214,10 +346,24 @@ interface ParsedDatatypeProperty {
   comment: string | null;
   isIdentifier: boolean;
   unit: string | null;
-  enumValues: string | null;
+  enumConstraint: boolean;
+  enumValues: string[] | null;
   propertyType: string | null;
   relationshipAttributeOf: string | null;
   attributeType: string | null;
+  order: number | null;
+}
+
+function inferPropertyType(property: ParsedDatatypeProperty): PropertyType {
+  if (property.propertyType && isValidPropertyType(property.propertyType)) {
+    return property.propertyType;
+  }
+  if (property.enumConstraint) return 'enum';
+  if (property.rangeUri) {
+    const xsdLocal = localNameFromUri(property.rangeUri);
+    if (XSD_TO_TYPE[xsdLocal]) return XSD_TO_TYPE[xsdLocal];
+  }
+  return 'string';
 }
 
 /**
@@ -244,6 +390,7 @@ export function parseRDF(rdfXml: string): { ontology: Ontology; bindings: DataBi
 
   const root = doc.documentElement;
   const descriptionTypeIndex = indexDescriptionTypes(root);
+  const shaclPathMetadata = parseShaclPathMetadata(root, descriptionTypeIndex);
 
   // --- Extract ontology metadata ---
   let ontologyName = '';
@@ -258,13 +405,50 @@ export function parseRDF(rdfXml: string): { ontology: Ontology; bindings: DataBi
 
   // --- Extract OWL Classes → EntityTypes ---
   const classEls = getTypedElements(root, OWL_NS, 'Class', descriptionTypeIndex);
+  const objPropEls = getTypedElements(
+    root,
+    OWL_NS,
+    'ObjectProperty',
+    descriptionTypeIndex,
+  );
+  const objectPropertyUris = new Set(
+    objPropEls
+      .map((element) => getRdfAttribute(element, 'about'))
+      .filter((uri): uri is string => Boolean(uri)),
+  );
   const entityMap = new Map<string, EntityType>();
   const usedEntityIds = new Set<string>();
+  const associationRelationshipByClass = new Map<string, string>();
+  const identifierPropertiesByClass = new Map<string, Set<string>>();
+
+  for (const el of classEls) {
+    const about = getRdfAttribute(el, 'about') || '';
+    if (!about) continue;
+
+    const isStatementAssociation = getChildResources(el, 'subClassOf')
+      .includes(`${RDF_NS}Statement`);
+    const relatedRelationship = getChildResource(el, 'relation');
+    if (
+      isStatementAssociation
+      && relatedRelationship
+      && objectPropertyUris.has(relatedRelationship)
+    ) {
+      associationRelationshipByClass.set(
+        about,
+        localNameFromUri(relatedRelationship),
+      );
+    }
+
+    const identifierProperties = getCollectionResources(el, 'hasKey');
+    if (identifierProperties.length > 0) {
+      identifierPropertiesByClass.set(about, new Set(identifierProperties));
+    }
+  }
 
   for (let i = 0; i < classEls.length; i++) {
     const el = classEls[i];
-    const about = el.getAttribute('rdf:about') || el.getAttributeNS(RDF_NS, 'about') || '';
-    if (!about) continue;
+    const about = getRdfAttribute(el, 'about') || '';
+    if (!about || associationRelationshipByClass.has(about)) continue;
 
     const className = localNameFromUri(about);
     const existingEntity = entityMap.get(about);
@@ -296,41 +480,69 @@ export function parseRDF(rdfXml: string): { ontology: Ontology; bindings: DataBi
 
   for (let i = 0; i < dtPropEls.length; i++) {
     const el = dtPropEls[i];
-    const about = el.getAttribute('rdf:about') || el.getAttributeNS(RDF_NS, 'about') || '';
+    const about = getRdfAttribute(el, 'about') || '';
     if (!about) continue;
 
     const comments = getChildTexts(el, 'comment');
     const hasIdentifierComment = comments.some(c => /^identifier\s+property$/i.test(c.trim()));
     const descriptionComment = comments.find(c => !/^identifier\s+property$/i.test(c.trim())) ?? null;
+    const domainUri = getChildResource(el, 'domain');
+    const legacyEnumValues = getChildText(el, 'enumValues');
+    const shapeMetadata = shaclPathMetadata.get(about);
 
     parsedDtProps.push({
       about,
       label: getChildText(el, 'label', RDFS_NS) || localNameFromUri(about),
-      domainUri: getChildResource(el, 'domain'),
+      domainUri,
       rangeUri: getChildResource(el, 'range'),
       comment: descriptionComment,
-      isIdentifier: getChildText(el, 'isIdentifier') === 'true' || hasIdentifierComment,
+      isIdentifier: (
+        getChildText(el, 'isIdentifier') === 'true'
+        || hasIdentifierComment
+        || Boolean(
+          domainUri
+          && identifierPropertiesByClass.get(domainUri)?.has(about),
+        )
+      ),
       unit: getChildText(el, 'unit'),
-      enumValues: getChildText(el, 'enumValues'),
+      enumConstraint: Boolean(shapeMetadata?.enumValues),
+      enumValues: (
+        shapeMetadata?.enumValues
+        || (legacyEnumValues ? legacyEnumValues.split(',') : null)
+      ),
       propertyType: getChildText(el, 'propertyType'),
       relationshipAttributeOf: getChildText(el, 'relationshipAttributeOf'),
       attributeType: getChildText(el, 'attributeType'),
+      order: shapeMetadata?.order ?? null,
     });
   }
 
   // Collect relationship attributes separately
   const relAttrMap = new Map<string, RelationshipAttribute[]>();
+  const orderByEntityProperty = new WeakMap<Property, number>();
+  const orderByRelationshipAttribute = new WeakMap<RelationshipAttribute, number>();
 
   for (const dtProp of parsedDtProps) {
-    if (dtProp.relationshipAttributeOf) {
-      const relId = dtProp.relationshipAttributeOf;
+    const associationRelationship = dtProp.domainUri
+      ? associationRelationshipByClass.get(dtProp.domainUri)
+      : undefined;
+    const attributeRelationship = (
+      dtProp.relationshipAttributeOf
+      || associationRelationship
+    );
+    if (attributeRelationship) {
+      const relId = attributeRelationship;
       if (!relAttrMap.has(relId)) {
         relAttrMap.set(relId, []);
       }
-      relAttrMap.get(relId)!.push({
+      const attribute: RelationshipAttribute = {
         name: dtProp.label,
-        type: dtProp.attributeType || 'string',
-      });
+        type: dtProp.attributeType || inferPropertyType(dtProp),
+      };
+      if (dtProp.order !== null) {
+        orderByRelationshipAttribute.set(attribute, dtProp.order);
+      }
+      relAttrMap.get(relId)!.push(attribute);
       continue;
     }
 
@@ -340,45 +552,44 @@ export function parseRDF(rdfXml: string): { ontology: Ontology; bindings: DataBi
     const entity = entityMap.get(dtProp.domainUri);
     if (!entity) continue;
 
-    // Determine property type
-    let propType: PropertyType = 'string';
-    if (dtProp.propertyType && isValidPropertyType(dtProp.propertyType)) {
-      propType = dtProp.propertyType;
-    } else if (dtProp.rangeUri) {
-      const xsdLocal = localNameFromUri(dtProp.rangeUri);
-      if (XSD_TO_TYPE[xsdLocal]) {
-        propType = XSD_TO_TYPE[xsdLocal];
-      }
-    }
-
     const prop: Property = {
       name: dtProp.label,
-      type: propType,
+      type: inferPropertyType(dtProp),
     };
 
     if (dtProp.isIdentifier) prop.isIdentifier = true;
     if (dtProp.unit) prop.unit = dtProp.unit;
     if (dtProp.enumValues) {
-      prop.values = dtProp.enumValues.split(',');
+      prop.values = dtProp.enumValues;
     }
     if (dtProp.comment) prop.description = dtProp.comment;
+    if (dtProp.order !== null) {
+      orderByEntityProperty.set(prop, dtProp.order);
+    }
 
     entity.properties.push(prop);
   }
 
+  for (const entity of entityMap.values()) {
+    entity.properties.sort((left, right) => (
+      (orderByEntityProperty.get(left) ?? Number.MAX_SAFE_INTEGER)
+      - (orderByEntityProperty.get(right) ?? Number.MAX_SAFE_INTEGER)
+    ));
+  }
+  for (const attributes of relAttrMap.values()) {
+    attributes.sort((left, right) => (
+      (orderByRelationshipAttribute.get(left) ?? Number.MAX_SAFE_INTEGER)
+      - (orderByRelationshipAttribute.get(right) ?? Number.MAX_SAFE_INTEGER)
+    ));
+  }
+
   // --- Extract ObjectProperties → Relationships ---
-  const objPropEls = getTypedElements(
-    root,
-    OWL_NS,
-    'ObjectProperty',
-    descriptionTypeIndex,
-  );
   const relationships: Relationship[] = [];
   const usedRelationshipIds = new Set<string>();
 
   for (let i = 0; i < objPropEls.length; i++) {
     const el = objPropEls[i];
-    const about = el.getAttribute('rdf:about') || el.getAttributeNS(RDF_NS, 'about') || '';
+    const about = getRdfAttribute(el, 'about') || '';
     if (!about) continue;
 
     const sourceRelId = localNameFromUri(about) || 'relationship';
@@ -406,10 +617,25 @@ export function parseRDF(rdfXml: string): { ontology: Ontology; bindings: DataBi
       }
     }
 
-    const cardinalityStr = getChildText(el, 'cardinality') || 'one-to-many';
-    const cardinality: Cardinality = isValidCardinality(cardinalityStr)
-      ? cardinalityStr
-      : 'one-to-many';
+    const cardinalityStr = getChildText(el, 'cardinality');
+    const shapeMetadata = shaclPathMetadata.get(about);
+    let cardinality: Cardinality = 'one-to-many';
+    if (cardinalityStr && isValidCardinality(cardinalityStr)) {
+      cardinality = cardinalityStr;
+    } else if (
+      shapeMetadata?.hasForwardShape
+      || shapeMetadata?.hasInverseShape
+    ) {
+      if (shapeMetadata.forwardMaxOne && shapeMetadata.inverseMaxOne) {
+        cardinality = 'one-to-one';
+      } else if (shapeMetadata.forwardMaxOne) {
+        cardinality = 'many-to-one';
+      } else if (shapeMetadata.inverseMaxOne) {
+        cardinality = 'one-to-many';
+      } else {
+        cardinality = 'many-to-many';
+      }
+    }
 
     const rel: Relationship = {
       id: relId,
