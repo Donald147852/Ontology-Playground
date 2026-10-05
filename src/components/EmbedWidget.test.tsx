@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { createHash } from 'node:crypto';
 import {
   act,
   fireEvent,
@@ -10,7 +11,8 @@ import userEvent from '@testing-library/user-event';
 import { EmbedWidget } from './EmbedWidget';
 import type { EmbedConfig } from './EmbedWidget';
 import type { Ontology } from '../data/ontology';
-import type { Catalogue } from '../types/catalogue';
+import { clearCatalogueCache } from '../lib/catalogue';
+import type { Catalogue, CatalogueEntryPayload } from '../types/catalogue';
 import { createGraphView } from '../lib/graphView';
 
 // Minimal ontology for testing (ASCII-only icons to avoid btoa encoding issues in jsdom)
@@ -26,7 +28,16 @@ const testOntology: Ontology = {
   ],
 };
 
+const fakePayload: CatalogueEntryPayload = {
+  schemaVersion: 1,
+  id: 'official/test',
+  ontology: testOntology,
+  bindings: [],
+};
+const fakePayloadContent = JSON.stringify(fakePayload, null, 2) + '\n';
+
 const fakeCatalogue: Catalogue = {
+  schemaVersion: 2,
   generatedAt: '2025-01-01T00:00:00Z',
   count: 1,
   entries: [{
@@ -38,8 +49,10 @@ const fakeCatalogue: Catalogue = {
     tags: [],
     author: 'Test',
     source: 'official',
-    ontology: testOntology,
-    bindings: [],
+    entityCount: 2,
+    relationshipCount: 1,
+    payloadUrl: 'catalogue-payloads/official/test/payload.json',
+    payloadHash: `sha256:${createHash('sha256').update(fakePayloadContent).digest('hex')}`,
   }],
 };
 
@@ -125,6 +138,19 @@ function createWideOntology(): Ontology {
   };
 }
 
+function mockCatalogueFetch() {
+  return vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+    const url = input.toString();
+    if (url.endsWith('/catalogue.json')) {
+      return new Response(JSON.stringify(fakeCatalogue), { status: 200 });
+    }
+    if (url.endsWith(fakeCatalogue.entries[0].payloadUrl)) {
+      return new Response(fakePayloadContent, { status: 200 });
+    }
+    return new Response('not found', { status: 404 });
+  });
+}
+
 function mockFetch(data: unknown, ok = true) {
   vi.spyOn(globalThis, 'fetch').mockResolvedValue({
     ok,
@@ -199,6 +225,8 @@ vi.mock('cytoscape', () => {
 vi.mock('cytoscape-fcose', () => ({ default: vi.fn() }));
 
 beforeEach(() => {
+  clearCatalogueCache();
+  vi.restoreAllMocks();
   vi.clearAllMocks();
   for (const key of Object.keys(embedGraphMocks.handlers)) {
     delete embedGraphMocks.handlers[key];
@@ -211,7 +239,7 @@ afterEach(() => {
 
 describe('EmbedWidget', () => {
   it('shows loading state then renders ontology name', async () => {
-    mockFetch(fakeCatalogue);
+    const fetchMock = mockCatalogueFetch();
     const config: EmbedConfig = { catalogueId: 'official/test', theme: 'dark', height: '400px' };
     render(<EmbedWidget config={config} />);
 
@@ -220,6 +248,7 @@ describe('EmbedWidget', () => {
     await waitFor(() => {
       expect(screen.getByText('Test Ontology')).toBeTruthy();
     });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('loads ontology from inline base64 JSON', async () => {
@@ -254,13 +283,14 @@ describe('EmbedWidget', () => {
   });
 
   it('shows error when catalogue ID not found', async () => {
-    mockFetch(fakeCatalogue);
+    const fetchMock = mockCatalogueFetch();
     const config: EmbedConfig = { catalogueId: 'nonexistent', theme: 'dark', height: '400px' };
     render(<EmbedWidget config={config} />);
 
     await waitFor(() => {
       expect(screen.getByText(/not found in catalogue/)).toBeTruthy();
     });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('switches between Graph and RDF Source tabs', async () => {

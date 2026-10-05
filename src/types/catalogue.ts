@@ -9,14 +9,29 @@ export interface CatalogueEntry {
   tags: string[];
   author: string;
   source: 'official' | 'community' | 'external';
+  entityCount: number;
+  relationshipCount: number;
+  payloadUrl: string;
+  payloadHash: string;
   license?: string;
   sourceUrl?: string;
   version?: string;
+}
+
+export interface CatalogueEntryPayload {
+  schemaVersion: 1;
+  id: string;
+  ontology: Ontology;
+  bindings: DataBinding[];
+}
+
+export interface LoadedCatalogueEntry extends CatalogueEntry {
   ontology: Ontology;
   bindings: DataBinding[];
 }
 
 export interface Catalogue {
+  schemaVersion: 2;
   generatedAt: string;
   count: number;
   entries: CatalogueEntry[];

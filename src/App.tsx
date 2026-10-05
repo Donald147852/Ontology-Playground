@@ -31,7 +31,7 @@ import { useDesignerStore } from './store/designerStore';
 import { useRoute } from './hooks/useRoute';
 import { navigate } from './lib/router';
 import { decodeSharePayload } from './lib/shareCodec';
-import type { Catalogue } from './types/catalogue';
+import { loadCatalogueEntry } from './lib/catalogue';
 import { Search, MessageSquare, Info, Compass, LayoutGrid, PenTool, BookOpen, FileJson, HelpCircle, Database, Palette, FileText } from 'lucide-react';
 import './styles/app.css';
 
@@ -76,25 +76,29 @@ function App() {
   useEffect(() => {
     if (route.page === 'catalogue' && route.ontologyId) {
       const id = route.ontologyId;
-      fetch(`${import.meta.env.BASE_URL}catalogue.json`)
-        .then((res) => {
-          if (!res.ok) throw new Error(`Failed to load catalogue (${res.status})`);
-          return res.json() as Promise<Catalogue>;
-        })
-        .then((data) => {
-          const entry = data.entries.find((e) => e.id === id);
-          if (entry) {
+      let cancelled = false;
+
+      loadCatalogueEntry(id)
+        .then((entry) => {
+          if (!cancelled) {
             loadOntology(entry.ontology, entry.bindings);
-            // URL stays at /#/catalogue/<id> so it's shareable
-          } else {
-            // Unknown ontology id — open gallery so the user can pick
-            navigate({ page: 'catalogue' });
           }
         })
-        .catch(() => {
-          // On error, open gallery
-          navigate({ page: 'catalogue' });
+        .catch((error) => {
+          if (!cancelled) {
+            setToast({
+              message: error instanceof Error
+                ? error.message
+                : 'Failed to load catalogue ontology',
+              icon: '!',
+            });
+            navigate({ page: 'catalogue' });
+          }
         });
+
+      return () => {
+        cancelled = true;
+      };
     }
   }, [route, loadOntology]);
 

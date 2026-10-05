@@ -33,7 +33,10 @@ domains (Retail, E-Commerce, Healthcare, Finance, Manufacturing, Education).
 Browse by category, search by name or tags, load any ontology with one click,
 and view its RDF source. Catalogue cards preserve and display available
 license, upstream source, and version attribution for external standards and
-adapted community entries. Every ontology has a shareable deep link
+adapted community entries. The gallery downloads a lightweight metadata index;
+each versioned ontology payload is fetched and integrity-checked only when
+loaded, embedded, edited, or viewed as RDF. Every ontology has a shareable
+deep link
 (`/#/catalogue/official/cosmic-coffee`).
 
 ### Visual Ontology Designer
@@ -295,7 +298,7 @@ Ontology-Playground/
 ├── scripts/              # Build-time compilers (catalogue, learning content)
 ├── api/                  # Azure Functions v4 backend (optional)
 ├── docs/                 # Guides and documentation
-├── public/               # Static assets (compiled catalogue.json, learn.json)
+├── public/               # Static assets (catalogue index/payloads, learn.json)
 └── .github/workflows/    # CI/CD (Azure SWA + GitHub Pages)
 ```
 

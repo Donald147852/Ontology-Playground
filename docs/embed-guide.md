@@ -16,7 +16,10 @@ Replace `YOUR_SITE_URL` with the URL where your Ontology Playground app is deplo
 <script src="YOUR_SITE_URL/embed/ontology-embed.js"></script>
 ```
 
-That's it! The widget loads the ontology from the catalogue and renders an interactive graph.
+That's it! The widget loads the lightweight catalogue index, fetches only the
+selected ontology's content-addressed payload, verifies its hash, and renders
+an interactive graph. Concurrent widgets for the same entry share the cached
+request and parsed payload.
 
 ## Available Ontologies
 
@@ -120,7 +123,7 @@ Encode your ontology JSON as base64 and pass it directly:
 | `data-catalogue-id` | One of three sources | — | Ontology ID from the catalogue |
 | `data-ontology-url` | One of three sources | — | URL to an RDF/XML or JSON ontology file |
 | `data-ontology-inline` | One of three sources | — | Base64-encoded ontology JSON |
-| `data-catalogue-base-url` | No | Current page origin | Base URL where `catalogue.json` is hosted |
+| `data-catalogue-base-url` | No | Current page origin | Base URL where `catalogue.json` and `catalogue-payloads/` are hosted |
 | `data-theme` | No | `dark` | Color theme: `dark` or `light` |
 | `data-height` | No | `500px` | Widget height (any CSS value) |
 

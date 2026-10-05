@@ -30,6 +30,7 @@ import type { Ontology, EntityType, Relationship } from '../data/ontology';
 import { serializeToRDF } from '../lib/rdf/serializer';
 import { parseRDF } from '../lib/rdf/parser';
 import { highlightRdf, RDF_HIGHLIGHT_DARK, RDF_HIGHLIGHT_LIGHT } from '../lib/rdf/highlighter';
+import { loadCatalogueEntry } from '../lib/catalogue';
 import {
   BOUNDED_LABEL_ZOOM_THRESHOLD,
   createGraphView,
@@ -44,7 +45,6 @@ import {
   restoreGraphViewport,
   type GraphPositionSnapshot,
 } from '../lib/graphPositionPersistence';
-import type { Catalogue } from '../types/catalogue';
 import {
   EMBED_THEMES,
   type EmbedThemeTokens,
@@ -96,16 +96,11 @@ export function EmbedWidget({ config }: { config: EmbedConfig }) {
           const json = atob(config.ontologyInline);
           ont = JSON.parse(json) as Ontology;
         } else if (config.catalogueId) {
-          // Load from catalogue.json
+          // Load the index and only this entry's versioned payload.
           const base = config.catalogueBaseUrl
             || (document.currentScript as HTMLScriptElement | null)?.src.replace(/\/[^/]+$/, '/')
             || window.location.origin + '/';
-          const catalogueUrl = base.endsWith('/') ? `${base}catalogue.json` : `${base}/catalogue.json`;
-          const res = await fetch(catalogueUrl);
-          if (!res.ok) throw new Error(`Failed to load catalogue (${res.status})`);
-          const cat = (await res.json()) as Catalogue;
-          const entry = cat.entries.find((e) => e.id === config.catalogueId);
-          if (!entry) throw new Error(`Ontology "${config.catalogueId}" not found in catalogue`);
+          const entry = await loadCatalogueEntry(config.catalogueId, base);
           ont = entry.ontology;
         } else if (config.ontologyUrl) {
           // Fetch from URL

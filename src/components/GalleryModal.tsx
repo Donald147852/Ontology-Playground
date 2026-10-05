@@ -5,9 +5,10 @@ import { useDesignerStore } from '../store/designerStore';
 import { useAppStore } from '../store/appStore';
 import { serializeToRDF } from '../lib/rdf/serializer';
 import { highlightRdf, RDF_HIGHLIGHT_DARK, RDF_HIGHLIGHT_LIGHT } from '../lib/rdf/highlighter';
+import { loadCatalogueEntry, loadCatalogueIndex } from '../lib/catalogue';
 import { navigate, parseHash } from '../lib/router';
 import { buildOntologyEmbedSnippet } from '../lib/contentSafety';
-import type { CatalogueEntry, Catalogue } from '../types/catalogue';
+import type { CatalogueEntry, LoadedCatalogueEntry } from '../types/catalogue';
 import { CATEGORY_COLORS, CATEGORY_LABELS } from '../types/catalogue';
 
 interface GalleryModalProps {
@@ -29,6 +30,9 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
   const [rdfViewId, setRdfViewId] = useState<string | null>(null);
   const [visibleCount, setVisibleCount] = useState(12);
   const [copiedEmbedId, setCopiedEmbedId] = useState<string | null>(null);
+  const [loadedEntries, setLoadedEntries] = useState<Record<string, LoadedCatalogueEntry>>({});
+  const [loadingEntryIds, setLoadingEntryIds] = useState<Set<string>>(new Set());
+  const [payloadErrors, setPayloadErrors] = useState<Record<string, string>>({});
 
   // Keep filters in sync with URL query params (including page refresh + hash navigation)
   useEffect(() => {
@@ -44,21 +48,27 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
     return () => window.removeEventListener('hashchange', syncFiltersFromHash);
   }, []);
 
-  // Load catalogue.json
+  // Load only the lightweight catalogue index.
   useEffect(() => {
-    fetch(`${import.meta.env.BASE_URL}catalogue.json`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`Failed to load catalogue (${res.status})`);
-        return res.json() as Promise<Catalogue>;
-      })
+    let cancelled = false;
+
+    loadCatalogueIndex()
       .then((data) => {
-        setCatalogue(data.entries);
-        setLoading(false);
+        if (!cancelled) {
+          setCatalogue(data.entries);
+          setLoading(false);
+        }
       })
       .catch((err) => {
-        setError(err.message);
-        setLoading(false);
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : String(err));
+          setLoading(false);
+        }
       });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Derive available categories from loaded data
@@ -104,8 +114,48 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
     setVisibleCount((c) => c + 12);
   }, []);
 
-  const handleLoadOntology = (entry: CatalogueEntry) => {
-    loadOntology(entry.ontology, entry.bindings);
+  const getLoadedEntry = useCallback(async (
+    entry: CatalogueEntry,
+  ): Promise<LoadedCatalogueEntry | null> => {
+    const cached = loadedEntries[entry.id];
+    if (cached) return cached;
+
+    setLoadingEntryIds((current) => new Set(current).add(entry.id));
+    setPayloadErrors((current) => {
+      const next = { ...current };
+      delete next[entry.id];
+      return next;
+    });
+
+    try {
+      const loaded = await loadCatalogueEntry(entry.id);
+      setLoadedEntries((current) => ({
+        ...current,
+        [entry.id]: loaded,
+      }));
+      return loaded;
+    } catch (loadError) {
+      setPayloadErrors((current) => ({
+        ...current,
+        [entry.id]: loadError instanceof Error
+          ? loadError.message
+          : 'Failed to load ontology payload',
+      }));
+      return null;
+    } finally {
+      setLoadingEntryIds((current) => {
+        const next = new Set(current);
+        next.delete(entry.id);
+        return next;
+      });
+    }
+  }, [loadedEntries]);
+
+  const handleLoadOntology = async (entry: CatalogueEntry) => {
+    const loaded = await getLoadedEntry(entry);
+    if (!loaded) return;
+
+    loadOntology(loaded.ontology, loaded.bindings);
     // Navigate to the ontology deep link so the URL is shareable
     navigate({
       page: 'catalogue',
@@ -115,8 +165,25 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
     });
   };
 
-  const handleViewRdf = (entry: CatalogueEntry) => {
-    setRdfViewId(rdfViewId === entry.id ? null : entry.id);
+  const handleViewRdf = async (entry: CatalogueEntry) => {
+    if (rdfViewId === entry.id) {
+      setRdfViewId(null);
+      return;
+    }
+
+    const loaded = await getLoadedEntry(entry);
+    if (loaded) {
+      setRdfViewId(entry.id);
+    }
+  };
+
+  const handleEditOntology = async (entry: CatalogueEntry) => {
+    const loaded = await getLoadedEntry(entry);
+    if (!loaded) return;
+
+    loadOntology(loaded.ontology, loaded.bindings);
+    useDesignerStore.getState().loadDraft(loaded.ontology);
+    navigate({ page: 'designer' });
   };
 
   const handleCopyEmbed = (entry: CatalogueEntry) => {
@@ -260,9 +327,11 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
           <>
           <div className="gallery-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(340px, 100%), 1fr))', gap: 16 }}>
             {visibleEntries.map((entry) => {
-              const isActive = currentOntology.name === entry.ontology.name;
+              const loadedEntry = loadedEntries[entry.id];
+              const isLoadingEntry = loadingEntryIds.has(entry.id);
+              const isActive = currentOntology.name === entry.name;
               const categoryColor = CATEGORY_COLORS[entry.category] ?? '#6B7280';
-              const showRdf = rdfViewId === entry.id;
+              const showRdf = rdfViewId === entry.id && loadedEntry !== undefined;
 
               return (
                 <motion.div
@@ -277,10 +346,14 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
                       : 'var(--bg-tertiary)',
                     borderRadius: 'var(--radius-lg)',
                     border: isActive ? '2px solid var(--ms-blue)' : '2px solid transparent',
-                    cursor: isActive ? 'default' : 'pointer',
+                    cursor: isActive || isLoadingEntry ? 'default' : 'pointer',
                     transition: 'border-color 0.2s, background 0.2s',
                   }}
-                  onClick={() => !isActive && handleLoadOntology(entry)}
+                  onClick={() => {
+                    if (!isActive && !isLoadingEntry) {
+                      void handleLoadOntology(entry);
+                    }
+                  }}
                 >
                   {/* Card header */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
@@ -401,6 +474,19 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
 
                   <CatalogueAttribution entry={entry} />
 
+                  {payloadErrors[entry.id] && (
+                    <div
+                      role="alert"
+                      style={{
+                        color: 'var(--error)',
+                        fontSize: 12,
+                        marginBottom: 10,
+                      }}
+                    >
+                      {payloadErrors[entry.id]}
+                    </div>
+                  )}
+
                   {/* Stats + actions */}
                   <div
                     style={{
@@ -415,13 +501,13 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <Layers size={14} color="var(--text-tertiary)" />
                         <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                          {entry.ontology.entityTypes.length} entities
+                          {entry.entityCount} entities
                         </span>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <ArrowRight size={14} color="var(--text-tertiary)" />
                         <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                          {entry.ontology.relationships.length} relationships
+                          {entry.relationshipCount} relationships
                         </span>
                       </div>
                     </div>
@@ -430,10 +516,11 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
                       <button
                         className="btn btn-secondary"
                         style={{ padding: '5px 8px', fontSize: 11 }}
-                        title="View RDF source"
+                        title={isLoadingEntry ? 'Loading ontology payload' : 'View RDF source'}
+                        disabled={isLoadingEntry}
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleViewRdf(entry);
+                          void handleViewRdf(entry);
                         }}
                       >
                         <Code size={13} />
@@ -453,15 +540,10 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
                         className="btn btn-secondary"
                         style={{ padding: '5px 8px', fontSize: 11 }}
                         title="Edit in Designer"
+                        disabled={isLoadingEntry}
                         onClick={(e) => {
                           e.stopPropagation();
-                          // Load into both stores: playground (appStore) and designer
-                          loadOntology(entry.ontology, entry.bindings);
-                          useDesignerStore.getState().loadDraft(entry.ontology);
-                          // Navigate to designer — the Gallery auto-unmounts because
-                          // showGallery is route-driven (no need to call onClose,
-                          // which would navigate to 'home' and overwrite this route).
-                          navigate({ page: 'designer' });
+                          void handleEditOntology(entry);
                         }}
                       >
                         <Pencil size={13} />
@@ -472,10 +554,11 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
                           style={{ padding: '6px 12px', fontSize: 12 }}
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleLoadOntology(entry);
+                            void handleLoadOntology(entry);
                           }}
+                          disabled={isLoadingEntry}
                         >
-                          Load
+                          {isLoadingEntry ? 'Loading…' : 'Load'}
                         </button>
                       )}
                     </div>
@@ -491,7 +574,10 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
                         style={{ overflow: 'hidden' }}
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <GalleryRdfSource ontology={entry.ontology} bindings={entry.bindings} />
+                        <GalleryRdfSource
+                          ontology={loadedEntry.ontology}
+                          bindings={loadedEntry.bindings}
+                        />
                       </motion.div>
                     )}
                   </AnimatePresence>

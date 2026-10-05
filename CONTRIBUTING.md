@@ -74,6 +74,9 @@ The easiest way to contribute is to add an ontology to the community catalogue:
    npm run catalogue:build   # must succeed
    npm test                  # all tests must pass
    ```
+   The compiler writes card metadata to `public/catalogue.json` and writes each
+   graph to a content-addressed file under `public/catalogue-payloads/`. These
+   generated files are ignored by Git; the production build publishes both.
 5. **Open a Pull Request** against the `main` branch
    - CI will automatically validate your RDF and metadata
    - A maintainer will review and merge

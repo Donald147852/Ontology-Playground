@@ -2,28 +2,37 @@
  * Build-time catalogue compiler.
  *
  * Reads all catalogue/**\/*.rdf files, parses each via the RDF parser,
- * reads associated metadata.json, and emits public/catalogue.json.
+ * reads associated metadata.json, and emits a lightweight catalogue index
+ * plus one content-addressed payload per ontology.
  *
  * Usage: npx tsx scripts/compile-catalogue.ts
  */
+import { createHash } from 'node:crypto';
 import {
   closeSync,
   constants,
   fstatSync,
   lstatSync,
+  mkdirSync,
   openSync,
   readFileSync,
   readdirSync,
+  renameSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs';
 import type { Stats } from 'node:fs';
-import { join, basename, resolve } from 'node:path';
+import { join, basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { JSDOM } from 'jsdom';
 import { parseRDF } from '../src/lib/rdf/parser.js';
 import { serializeToRDF } from '../src/lib/rdf/serializer.js';
 import { validateOntologyStyle } from './style-validator.js';
-import type { CatalogueEntry, Catalogue } from '../src/types/catalogue.js';
+import type {
+  CatalogueEntry,
+  Catalogue,
+  CatalogueEntryPayload,
+} from '../src/types/catalogue.js';
 
 // Provide DOMParser for the RDF parser (browser API not available in Node)
 const dom = new JSDOM('');
@@ -33,6 +42,7 @@ const ROOT = join(import.meta.dirname, '..');
 const CATALOGUE_DIR = join(ROOT, 'catalogue');
 const OUTPUT_PATH = join(ROOT, 'public', 'catalogue.json');
 const CATALOGUE_TIERS = ['official', 'community', 'external'] as const;
+const PAYLOAD_DIR = join(ROOT, 'public', 'catalogue-payloads');
 
 // ------------------------------------------------------------------
 // Types
@@ -68,6 +78,16 @@ export interface CatalogueCompilerDependencies {
   beforeFileOpen?: (path: string) => void;
 }
 
+interface CompiledPayload {
+  relativePath: string;
+  content: string;
+}
+
+interface CompiledCatalogue {
+  catalogue: Catalogue;
+  payloads: CompiledPayload[];
+}
+
 // ------------------------------------------------------------------
 // Validation helpers
 // ------------------------------------------------------------------
@@ -93,6 +113,17 @@ function validateMetadata(
     throw new Error(
       `${filePath}: invalid category "${obj['category']}". Must be one of: ${VALID_CATEGORIES.join(', ')}`,
     );
+  }
+  for (const field of ['icon', 'author'] as const) {
+    if (obj[field] !== undefined && typeof obj[field] !== 'string') {
+      throw new Error(`${filePath}: metadata.json field "${field}" must be a string`);
+    }
+  }
+  if (
+    obj['tags'] !== undefined
+    && (!Array.isArray(obj['tags']) || obj['tags'].some((tag) => typeof tag !== 'string'))
+  ) {
+    throw new Error(`${filePath}: metadata.json field "tags" must be an array of strings`);
   }
   for (const field of ['license', 'sourceUrl', 'version'] as const) {
     if (
@@ -398,11 +429,12 @@ function readRegularCatalogueFile(
 // Main
 // ------------------------------------------------------------------
 
-export function compileCatalogue(
+function compileCatalogueArtifacts(
   catalogueDir: string = CATALOGUE_DIR,
   dependencies: CatalogueCompilerDependencies = {},
-): Catalogue {
+): CompiledCatalogue {
   const entries: CatalogueEntry[] = [];
+  const payloads: CompiledPayload[] = [];
   const seenIds = new Set<string>();
   let errors = 0;
 
@@ -529,6 +561,18 @@ export function compileCatalogue(
         }
       }
 
+      const payload: CatalogueEntryPayload = {
+        schemaVersion: 1,
+        id: entryId,
+        ontology,
+        bindings,
+      };
+      const payloadContent = JSON.stringify(payload, null, 2) + '\n';
+      const payloadHash = createHash('sha256')
+        .update(payloadContent)
+        .digest('hex');
+      const relativePayloadPath = `${entryId}/${payloadHash}.json`;
+
       seenIds.add(entryId);
       entries.push({
         id: entryId,
@@ -539,11 +583,17 @@ export function compileCatalogue(
         tags: metadata.tags ?? [],
         author: metadata.author ?? 'unknown',
         source,
+        entityCount: ontology.entityTypes.length,
+        relationshipCount: ontology.relationships.length,
+        payloadUrl: `catalogue-payloads/${relativePayloadPath}`,
+        payloadHash: `sha256:${payloadHash}`,
         license: metadata.license,
         sourceUrl: metadata.sourceUrl,
         version: metadata.version,
-        ontology,
-        bindings,
+      });
+      payloads.push({
+        relativePath: relativePayloadPath,
+        content: payloadContent,
       });
 
       console.log(`✔ ${source}/${slug}`);
@@ -555,10 +605,21 @@ export function compileCatalogue(
   }
 
   return {
-    generatedAt: new Date().toISOString(),
-    count: entries.length,
-    entries,
+    catalogue: {
+      schemaVersion: 2,
+      generatedAt: new Date().toISOString(),
+      count: entries.length,
+      entries,
+    },
+    payloads,
   };
+}
+
+export function compileCatalogue(
+  catalogueDir: string = CATALOGUE_DIR,
+  dependencies: CatalogueCompilerDependencies = {},
+): Catalogue {
+  return compileCatalogueArtifacts(catalogueDir, dependencies).catalogue;
 }
 
 export function runCatalogueCompiler(
@@ -566,9 +627,40 @@ export function runCatalogueCompiler(
   outputPath: string = OUTPUT_PATH,
   dependencies: CatalogueCompilerDependencies = {},
 ): Catalogue {
-  const catalogue = compileCatalogue(catalogueDir, dependencies);
-  writeFileSync(outputPath, JSON.stringify(catalogue, null, 2) + '\n', 'utf-8');
-  console.log(`\n✔ Wrote ${catalogue.count} entries to ${outputPath}`);
+  const { catalogue, payloads } = compileCatalogueArtifacts(
+    catalogueDir,
+    dependencies,
+  );
+  const payloadDirectory = outputPath === OUTPUT_PATH
+    ? PAYLOAD_DIR
+    : join(dirname(outputPath), 'catalogue-payloads');
+  const stagingDirectory = `${payloadDirectory}.tmp-${process.pid}`;
+
+  rmSync(stagingDirectory, { recursive: true, force: true });
+  mkdirSync(stagingDirectory, { recursive: true });
+
+  try {
+    for (const payload of payloads) {
+      const payloadPath = join(stagingDirectory, payload.relativePath);
+      mkdirSync(dirname(payloadPath), { recursive: true });
+      writeFileSync(payloadPath, payload.content, 'utf-8');
+    }
+
+    rmSync(payloadDirectory, { recursive: true, force: true });
+    renameSync(stagingDirectory, payloadDirectory);
+    writeFileSync(
+      outputPath,
+      JSON.stringify(catalogue, null, 2) + '\n',
+      'utf-8',
+    );
+  } catch (error) {
+    rmSync(stagingDirectory, { recursive: true, force: true });
+    throw error;
+  }
+
+  console.log(
+    `\n✔ Wrote ${catalogue.count} index entries and ${payloads.length} payloads`,
+  );
   return catalogue;
 }
 
