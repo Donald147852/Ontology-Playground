@@ -227,6 +227,26 @@ GitHub Pages build so asset paths resolve correctly.
 | `VITE_GITHUB_CLIENT_ID` | *(empty)* | GitHub OAuth App client ID for one-click catalogue PRs ([setup guide](docs/github-oauth-setup.md)) |
 | `VITE_GITHUB_OAUTH_BASE` | *(empty)* | External OAuth proxy URL for GitHub Pages deployments (e.g. Cloudflare Worker URL) |
 
+### Optional Azure Functions API
+
+The backend in `api/` uses the Azure Functions Node.js v4 programming model.
+It provides the AI ontology builder and the GitHub device-flow OAuth proxy for
+Azure Static Web Apps deployments.
+
+```bash
+cp api/local.settings.json.template api/local.settings.json
+# Replace only the local placeholder values; never commit local.settings.json.
+npm --prefix api ci
+npm --prefix api run build
+npm --prefix api test
+npm --prefix api start
+```
+
+The AI builder requires `AZURE_OPENAI_ENDPOINT` and `AZURE_OPENAI_API_KEY`.
+`AZURE_OPENAI_DEPLOYMENT` defaults to `gpt-4o-mini`. Keep
+`FUNCTIONS_NODE_BLOCK_ON_ENTRY_POINT_ERROR=true` so registration failures stop
+the Functions host instead of leaving routes unavailable.
+
 ## Project Structure
 
 ```
@@ -241,7 +261,7 @@ Ontology-Playground/
 ├── catalogue/            # Official + community ontology RDF files
 ├── content/learn/        # Course directories with markdown articles, quizzes, and metadata
 ├── scripts/              # Build-time compilers (catalogue, learning content)
-├── api/                  # Azure Functions backend (optional, for AI builder)
+├── api/                  # Azure Functions v4 backend (optional)
 ├── docs/                 # Guides and documentation
 ├── public/               # Static assets (compiled catalogue.json, learn.json)
 └── .github/workflows/    # CI/CD (Azure SWA + GitHub Pages)

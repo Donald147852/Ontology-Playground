@@ -16,8 +16,14 @@ jobs:
         with:
           node-version: 20
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            api/package-lock.json
 
       - run: npm ci --ignore-scripts
+
+      - name: Install API dependencies
+        run: npm --prefix api ci --ignore-scripts
 
       - name: Compile catalogue
         run: npm run catalogue:build
@@ -36,6 +42,9 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+      - name: Build and test API
+        run: npm --prefix api run build && npm --prefix api test
 
       - name: Build
         run: npx vite build
