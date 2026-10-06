@@ -165,7 +165,6 @@ function GraphPreview({ ontology, theme, onSelectEntity, onSelectRelationship }:
  *  rendering the component needs a canvas, which jsdom does not provide. */
 export function syncGraphElements(cy: Core, ontology: GraphPreviewProps['ontology']) {
   const currentNodeIds = new Set(cy.nodes().map((n) => n.id()));
-  const currentEdgeIds = new Set(cy.edges().map((e) => e.id()));
   const desiredNodeIds = new Set(ontology.entityTypes.map((e) => e.id));
   const desiredEdgeIds = new Set(ontology.relationships.map((r) => r.id));
 
@@ -175,6 +174,8 @@ export function syncGraphElements(cy: Core, ontology: GraphPreviewProps['ontolog
     return ele.isNode() ? !desiredNodeIds.has(id) : !desiredEdgeIds.has(id);
   });
   if (toRemove.length) toRemove.remove();
+  // Removing a node also removes its connected edges, so read edge IDs afterward.
+  const currentEdgeIds = new Set(cy.edges().map((e) => e.id()));
 
   // Add new nodes
   const newNodes: { data: Record<string, string> }[] = [];

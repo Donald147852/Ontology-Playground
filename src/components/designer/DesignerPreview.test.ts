@@ -69,6 +69,23 @@ describe('syncGraphElements', () => {
     expect(cy.edges()).toHaveLength(1);
   });
 
+  it('keeps a re-pointed edge when its old endpoint node is removed', () => {
+    const cy = graphOf({
+      entityTypes: [entity('book'), entity('author'), entity('member')],
+      relationships: [relationship('rel-1', 'member', 'author', 'writtenBy')],
+    });
+
+    syncGraphElements(cy, {
+      entityTypes: [entity('book'), entity('author')],
+      relationships: [relationship('rel-1', 'book', 'author', 'writtenBy')],
+    });
+
+    const edge = cy.getElementById('rel-1');
+    expect(edge).toHaveLength(1);
+    expect(edge.source().id()).toBe('book');
+    expect(edge.target().id()).toBe('author');
+  });
+
   it('keeps the endpoints and updates the label when only the name changes', () => {
     const entityTypes = [entity('book'), entity('author')];
     const cy = graphOf({
