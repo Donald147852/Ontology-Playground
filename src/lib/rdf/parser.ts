@@ -65,12 +65,16 @@ function getChildResource(
  * Children without an rdf:resource attribute (e.g. nested owl:Restriction
  * nodes) are ignored.
  */
-function getChildResources(parent: Element, localName: string): string[] {
+function getChildResources(
+  parent: Element,
+  localName: string,
+  namespace?: string,
+): string[] {
   const results: string[] = [];
   for (let i = 0; i < parent.children.length; i++) {
     const child = parent.children[i];
     const childLocal = child.localName || child.tagName.split(':').pop();
-    if (childLocal !== localName) continue;
+    if (childLocal !== localName || (namespace && child.namespaceURI !== namespace)) continue;
     const resource =
       child.getAttribute('rdf:resource') ||
       child.getAttributeNS(RDF_NS, 'resource');
@@ -167,7 +171,7 @@ function getTypedElements(root: Element, namespace: string, localName: string): 
     for (let j = 0; j < el.children.length; j++) {
       const child = el.children[j];
       const childLocal = child.localName || child.tagName.split(':').pop();
-      if (childLocal !== 'type') continue;
+      if (childLocal !== 'type' || child.namespaceURI !== RDF_NS) continue;
       const resource =
         child.getAttribute('rdf:resource') || child.getAttributeNS(RDF_NS, 'resource');
       if (resource === typeUri) {
@@ -399,7 +403,7 @@ export function parseRDF(rdfXml: string): { ontology: Ontology; bindings: DataBi
     const subEntity = entityMap.get(about);
     if (!subEntity) continue;
 
-    const superUris = getChildResources(el, 'subClassOf');
+    const superUris = getChildResources(el, 'subClassOf', RDFS_NS);
     for (const superUri of superUris) {
       // Only link classes that were imported as entities; skip external
       // references (owl:Thing, other vocabularies) and self-references.

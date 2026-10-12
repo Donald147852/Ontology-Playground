@@ -488,6 +488,25 @@ describe('parseRDF', () => {
       const { ontology } = parseRDF(mixed);
       expect(ontology.entityTypes).toHaveLength(2);
     });
+
+    it('does not treat a same-named predicate outside the RDF namespace as rdf:type', () => {
+      const rdf = `<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF
+    xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+    xmlns:owl="http://www.w3.org/2002/07/owl#"
+    xmlns:custom="http://example.org/custom#">
+    <owl:Ontology rdf:about="http://example.org/">
+        <rdfs:label>Namespace test</rdfs:label>
+    </owl:Ontology>
+    <rdf:Description rdf:about="http://example.org/NotAClass">
+        <custom:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+        <rdfs:label>Not a class</rdfs:label>
+    </rdf:Description>
+</rdf:RDF>`;
+      const { ontology } = parseRDF(rdf);
+      expect(ontology.entityTypes).toHaveLength(0);
+    });
   });
 
   describe('Turtle input detection (#85)', () => {
@@ -622,6 +641,25 @@ describe('parseRDF', () => {
       );
       const { ontology } = parseRDF(rdf);
       expect(ontology.relationships).toHaveLength(2);
+    });
+
+    it('ignores a same-named predicate outside the RDFS namespace', () => {
+      const rdf = hierarchyRdf
+        .replace(
+          'xmlns:owl="http://www.w3.org/2002/07/owl#">',
+          `xmlns:owl="http://www.w3.org/2002/07/owl#"
+    xmlns:custom="http://example.org/custom#">`
+        )
+        .replace(
+          '<rdfs:label>Equipment</rdfs:label>',
+          `<rdfs:label>Equipment</rdfs:label>
+        <custom:subClassOf rdf:resource="http://example.org/h/AHU"/>`
+        );
+      const { ontology } = parseRDF(rdf);
+      expect(ontology.relationships).toHaveLength(2);
+      expect(ontology.relationships).not.toContainEqual(
+        expect.objectContaining({ from: 'equipment', to: 'aHU' })
+      );
     });
 
     it('coexists with object-property relationships', () => {

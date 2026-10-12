@@ -20,6 +20,8 @@ The current RDF export is inline in `ImportExportModal.tsx` and there is no RDF
   `DOMParser`; no heavy deps)
 - [x] Support OWL classes → EntityTypes, DatatypeProperties → Properties,
   ObjectProperties → Relationships
+- [x] Support equivalent `rdf:Description` / `rdf:type` declarations
+- [x] Surface internal `rdfs:subClassOf` hierarchies as relationships
 - [x] Round-trip fidelity: `parse(serialize(ontology))` must produce an
   equivalent ontology
 

@@ -42,10 +42,12 @@ and export to RDF/XML or JSON.
 
 ### RDF Import & Export
 
-Full round-trip support for RDF/XML (OWL classes, datatype properties, object
-properties with cardinalities). Import `.rdf` / `.owl` files, export in the
-exact format Microsoft Fabric IQ expects, and verify fidelity with automated
-round-trip tests.
+Import and export the Playground's supported RDF/XML subset: OWL classes,
+datatype properties, object properties with cardinalities, and internal
+`rdfs:subClassOf` hierarchies. The importer accepts typed elements and the
+equivalent `rdf:Description` / `rdf:type` syntax. Export in the format Microsoft
+Fabric IQ expects, with automated round-trip tests for Playground-generated
+RDF. Turtle input is not currently supported.
 
 ### One-Click Catalogue PR
 
