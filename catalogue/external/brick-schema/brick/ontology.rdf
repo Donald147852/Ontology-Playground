@@ -17953,7 +17953,6 @@
   </rdf:Description>
   <rdf:Description rdf:nodeID="nb9a7cbf03e084154beb56edd67bba306b7273">
     <rdf:type rdf:resource="http://schema.org/Person"/>
-    <sdo:email>jbkoh@eng.ucsd.edu</sdo:email>
     <sdo:name>Jason Koh</sdo:name>
   </rdf:Description>
   <rdf:Description rdf:nodeID="nb9a7cbf03e084154beb56edd67bba306b7248">
@@ -39664,7 +39663,6 @@ CONSTRUCT {
   </rdf:Description>
   <rdf:Description rdf:nodeID="nb9a7cbf03e084154beb56edd67bba306b7272">
     <rdf:type rdf:resource="http://schema.org/Person"/>
-    <sdo:email>gtfierro@mines.edu</sdo:email>
     <sdo:name>Gabe Fierro</sdo:name>
   </rdf:Description>
   <rdf:Description rdf:about="https://brickschema.org/schema/BrickShape#haselectricalComplexPowerShape">
