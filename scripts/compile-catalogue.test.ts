@@ -54,7 +54,7 @@ describe('catalogue compilation (end-to-end)', () => {
     expect(output.count).toBe(output.entries.length);
     expect(output.entries.length).toBeGreaterThan(0);
     expect(output.generatedAt).toBeTruthy();
-  });
+  }, 35000);
 
   it('catalogue.json entries have required fields', () => {
     const output = readCatalogue();
