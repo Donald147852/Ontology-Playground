@@ -556,6 +556,7 @@ describe('parseRDF', () => {
         from: 'hVAC',
         to: 'equipment',
         cardinality: 'many-to-one',
+        kind: 'subclass',
       });
       expect(ontology.relationships).toContainEqual({
         id: 'aHU-subClassOf-hVAC',
@@ -563,6 +564,7 @@ describe('parseRDF', () => {
         from: 'aHU',
         to: 'hVAC',
         cardinality: 'many-to-one',
+        kind: 'subclass',
       });
     });
 
@@ -588,6 +590,7 @@ describe('parseRDF', () => {
         name: 'subClassOf',
         from: 'fan',
         to: 'equipment',
+        kind: 'subclass',
       });
     });
 
@@ -674,6 +677,55 @@ describe('parseRDF', () => {
       const { ontology } = parseRDF(rdf);
       expect(ontology.relationships).toHaveLength(3);
       expect(ontology.relationships.map((r) => r.name)).toContain('feeds');
+    });
+
+    it('keeps entity and relationship IDs unique across namespace collisions', () => {
+      const rdf = `<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF
+    xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+    xmlns:owl="http://www.w3.org/2002/07/owl#">
+    <owl:Class rdf:about="http://example.org/one/Thing">
+        <rdfs:label>First thing</rdfs:label>
+    </owl:Class>
+    <owl:Class rdf:about="http://example.org/two/Thing">
+        <rdfs:label>Second thing</rdfs:label>
+        <rdfs:subClassOf rdf:resource="http://example.org/one/Thing"/>
+    </owl:Class>
+    <owl:ObjectProperty rdf:about="http://example.org/one/connects">
+        <rdfs:domain rdf:resource="http://example.org/one/Thing"/>
+        <rdfs:range rdf:resource="http://example.org/two/Thing"/>
+    </owl:ObjectProperty>
+    <owl:ObjectProperty rdf:about="http://example.org/two/connects">
+        <rdfs:domain rdf:resource="http://example.org/two/Thing"/>
+        <rdfs:range rdf:resource="http://example.org/one/Thing"/>
+    </owl:ObjectProperty>
+</rdf:RDF>`;
+      const { ontology } = parseRDF(rdf);
+      expect(ontology.entityTypes.map((entity) => entity.id)).toEqual(['thing', 'thing-2']);
+      expect(ontology.relationships.map((relationship) => relationship.id)).toEqual([
+        'connects',
+        'connects-2',
+        'thing-2-subClassOf-thing',
+      ]);
+      expect(ontology.relationships[0]).toMatchObject({ from: 'thing', to: 'thing-2' });
+      expect(ontology.relationships[1]).toMatchObject({ from: 'thing-2', to: 'thing' });
+    });
+
+    it('avoids ID collisions between object properties and hierarchy edges', () => {
+      const rdf = hierarchyRdf.replace(
+        '</rdf:RDF>',
+        `<owl:ObjectProperty rdf:about="http://example.org/h/hVAC-subClassOf-equipment">
+           <rdfs:domain rdf:resource="http://example.org/h/AHU"/>
+           <rdfs:range rdf:resource="http://example.org/h/Equipment"/>
+         </owl:ObjectProperty></rdf:RDF>`
+      );
+      const { ontology } = parseRDF(rdf);
+      expect(new Set(ontology.relationships.map((relationship) => relationship.id)).size)
+        .toBe(ontology.relationships.length);
+      expect(ontology.relationships.map((relationship) => relationship.id)).toContain(
+        'hVAC-subClassOf-equipment-2'
+      );
     });
   });
 });

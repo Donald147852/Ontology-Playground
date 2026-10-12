@@ -49,6 +49,13 @@ export function serializeToRDF(
   bindings: DataBinding[] = [],
 ): string {
   const baseUri = deriveBaseUri(ontology.name);
+  const subclassParents = new Map<string, string[]>();
+  for (const relationship of ontology.relationships) {
+    if (relationship.kind !== 'subclass') continue;
+    const parents = subclassParents.get(relationship.from) ?? [];
+    parents.push(relationship.to);
+    subclassParents.set(relationship.from, parents);
+  }
 
   let rdf = '';
 
@@ -83,6 +90,9 @@ export function serializeToRDF(
     rdf += `        <rdfs:label>${escapeXml(entity.name)}</rdfs:label>\n`;
     if (entity.description) {
       rdf += `        <rdfs:comment>${escapeXml(entity.description)}</rdfs:comment>\n`;
+    }
+    for (const parentId of subclassParents.get(entity.id) ?? []) {
+      rdf += `        <rdfs:subClassOf rdf:resource="${baseUri}${capitalize(parentId)}"/>\n`;
     }
     // Store icon and color as custom annotations
     rdf += `        <ont:icon>${escapeXml(entity.icon)}</ont:icon>\n`;
@@ -131,6 +141,7 @@ export function serializeToRDF(
   rdf += '    <!-- ================== -->\n\n';
 
   for (const rel of ontology.relationships) {
+    if (rel.kind === 'subclass') continue;
     const fromClass = capitalize(rel.from);
     const toClass = capitalize(rel.to);
 
