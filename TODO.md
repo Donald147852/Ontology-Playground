@@ -24,8 +24,8 @@ The current RDF export is inline in `ImportExportModal.tsx` and there is no RDF
 - [x] Surface internal `rdfs:subClassOf` hierarchies as relationships
 - [x] Preserve `rdfs:subClassOf` semantics through RDF round trips and exclude
   class hierarchy edges from Fabric relationship exports
-- [x] Add a fast-layout and bounded-list guardrail for very large imported
-  ontologies
+- [x] Add graduated graph rendering: complete small views, reduced-noise dense
+  views, and searchable semantic hierarchy overviews for massive ontologies
 - [x] Round-trip fidelity: `parse(serialize(ontology))` must produce an
   equivalent ontology
 

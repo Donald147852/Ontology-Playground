@@ -36,6 +36,31 @@ const fakeCatalogue: Catalogue = {
   }],
 };
 
+function createLargeOntology(): Ontology {
+  const entityTypes = Array.from({ length: 350 }, (_, index) => ({
+    id: `node-${index}`,
+    name: `Node ${index}`,
+    description: `Taxonomy node ${index}`,
+    icon: 'N',
+    color: '#0078D4',
+    properties: [],
+  }));
+
+  return {
+    name: 'Large Embedded Taxonomy',
+    description: 'Large embed fixture',
+    entityTypes,
+    relationships: entityTypes.slice(1).map((entity, index) => ({
+      id: `parent-${index + 1}`,
+      name: 'subClassOf',
+      from: entity.id,
+      to: entityTypes[Math.floor(index / 3)].id,
+      cardinality: 'many-to-one',
+      kind: 'subclass',
+    })),
+  };
+}
+
 function mockFetch(data: unknown, ok = true) {
   vi.spyOn(globalThis, 'fetch').mockResolvedValue({
     ok,
@@ -50,6 +75,7 @@ function mockFetch(data: unknown, ok = true) {
 vi.mock('cytoscape', () => {
   type MockHandler = (...args: unknown[]) => void;
   const handlers: Record<string, MockHandler[]> = {};
+  const nodes = { toggleClass: vi.fn() };
   const mockCy = {
     on: (event: string, selectorOrFn: string | MockHandler, maybeFn?: MockHandler) => {
       const fn = maybeFn || selectorOrFn as MockHandler;
@@ -58,6 +84,8 @@ vi.mock('cytoscape', () => {
     },
     destroy: vi.fn(),
     container: () => document.createElement('div'),
+    nodes: () => nodes,
+    zoom: () => 1,
   };
   const cytoscape = vi.fn(() => mockCy);
   Object.assign(cytoscape, { use: vi.fn() });
@@ -67,19 +95,7 @@ vi.mock('cytoscape', () => {
 vi.mock('cytoscape-fcose', () => ({ default: vi.fn() }));
 
 beforeEach(() => {
-  vi.restoreAllMocks();
-  // Re-mock cytoscape since restoreAllMocks clears it
-  vi.mock('cytoscape', () => {
-    const mockCy = {
-      on: vi.fn(),
-      destroy: vi.fn(),
-      container: () => document.createElement('div'),
-    };
-    const cytoscape = vi.fn(() => mockCy);
-    Object.assign(cytoscape, { use: vi.fn() });
-    return { default: cytoscape };
-  });
-  vi.mock('cytoscape-fcose', () => ({ default: vi.fn() }));
+  vi.clearAllMocks();
 });
 
 afterEach(() => {
@@ -186,5 +202,43 @@ describe('EmbedWidget', () => {
     await waitFor(() => {
       expect(screen.getByText(/2 entities · 1 relationship/)).toBeTruthy();
     });
+  });
+
+  it('uses a bounded semantic overview for a massive embedded ontology', async () => {
+    const ontology = createLargeOntology();
+    const config: EmbedConfig = {
+      ontologyInline: btoa(JSON.stringify(ontology)),
+      theme: 'dark',
+      height: '400px',
+    };
+
+    render(<EmbedWidget config={config} />);
+
+    const controls = await screen.findByRole('region', {
+      name: 'Large ontology controls',
+    });
+    expect(controls).toHaveTextContent('Semantic overview');
+    expect(controls).toHaveTextContent(/of 350 entities/);
+    expect(controls).toHaveTextContent(/of 349 relationships/);
+  });
+
+  it('reveals deep entities through embedded overview search', async () => {
+    const ontology = createLargeOntology();
+    const config: EmbedConfig = {
+      ontologyInline: btoa(JSON.stringify(ontology)),
+      theme: 'light',
+      height: '400px',
+    };
+    const user = userEvent.setup();
+
+    render(<EmbedWidget config={config} />);
+
+    const search = await screen.findByRole('searchbox', {
+      name: 'Jump to an entity',
+    });
+    await user.type(search, 'Node 349');
+    await user.click(screen.getByRole('button', { name: 'Find' }));
+
+    expect(await screen.findByText('1 matching entity.')).toBeInTheDocument();
   });
 });

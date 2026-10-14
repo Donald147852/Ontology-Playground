@@ -52,9 +52,12 @@ datatype properties, object properties with cardinalities, and internal
 equivalent `rdf:Description` / `rdf:type` syntax. Export in the format Microsoft
 Fabric IQ expects, with automated round-trip tests for Playground-generated
 RDF. Imported class hierarchies remain `rdfs:subClassOf` statements on export
-and are not misrepresented as Fabric relationship types. Large graphs
-automatically use a fast grid layout and bounded UI lists instead of running an
-expensive force layout over every element. Turtle input is not currently
+and are not misrepresented as Fabric relationship types. Graph rendering
+graduates automatically with ontology size: small ontologies remain complete,
+dense ontologies retain all data with reduced label noise, and massive
+ontologies open as a bounded semantic hierarchy overview. Search, adjustable
+hop depth, and `+N` boundary expansion keep every hidden entity reachable
+without drawing the entire ontology at once. Turtle input is not currently
 supported.
 
 ### One-Click Catalogue PR

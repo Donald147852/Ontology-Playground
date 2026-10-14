@@ -772,6 +772,140 @@ body {
   pointer-events: none;
 }
 
+.large-graph-panel {
+  position: absolute;
+  z-index: 3;
+  top: 16px;
+  left: 16px;
+  width: min(360px, calc(100% - 32px));
+  padding: 14px;
+  background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(8px);
+}
+
+.large-graph-panel--collapsed {
+  width: auto;
+  padding: 10px 12px;
+}
+
+.large-graph-header,
+.large-graph-options,
+.large-graph-search > div {
+  display: flex;
+  align-items: center;
+}
+
+.large-graph-header {
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.large-graph-title {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.large-graph-tier {
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.large-graph-collapse,
+.large-graph-search button,
+.large-graph-options button {
+  padding: 6px 10px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.large-graph-collapse:hover,
+.large-graph-search button:hover,
+.large-graph-options button:hover {
+  background: var(--ms-blue);
+  color: var(--on-accent);
+  border-color: var(--ms-blue);
+}
+
+.large-graph-counts,
+.large-graph-hint,
+.large-graph-result,
+.large-graph-warning {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.large-graph-counts,
+.large-graph-hint {
+  color: var(--text-secondary);
+}
+
+.large-graph-search {
+  margin-top: 12px;
+}
+
+.large-graph-search label,
+.large-graph-options label {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.large-graph-search > div {
+  gap: 6px;
+  margin-top: 5px;
+}
+
+.large-graph-search input {
+  min-width: 0;
+  flex: 1;
+  padding: 7px 9px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 12px;
+}
+
+.large-graph-options {
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.large-graph-options select {
+  padding: 5px 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 12px;
+}
+
+.large-graph-options button {
+  margin-left: auto;
+}
+
+.large-graph-result {
+  color: var(--ms-green);
+}
+
+.large-graph-warning {
+  color: var(--ms-orange);
+}
+
 .graph-legend {
   position: absolute;
   bottom: 24px;
@@ -1443,6 +1577,18 @@ body {
 
   .graph-legend {
     display: none;
+  }
+
+  .large-graph-panel {
+    top: 12px;
+    left: 12px;
+    width: min(360px, calc(100% - 24px));
+    max-height: calc(100% - 80px);
+    overflow-y: auto;
+  }
+
+  .large-graph-panel--collapsed {
+    width: auto;
   }
 
   .graph-controls {

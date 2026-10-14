@@ -9,15 +9,20 @@
  *  - Dark/light theme
  *  - Loads ontology from catalogue, URL, or inline base64 JSON
  */
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { useEffect, useRef, useState, useMemo, type FormEvent } from 'react';
 import cytoscape from 'cytoscape';
 import fcose from 'cytoscape-fcose';
-import type { Core, EventObject } from 'cytoscape';
+import type { Core, EventObject, LayoutOptions } from 'cytoscape';
 import type { Ontology, EntityType, Relationship } from '../data/ontology';
 import { serializeToRDF } from '../lib/rdf/serializer';
 import { parseRDF } from '../lib/rdf/parser';
 import { highlightRdf, RDF_HIGHLIGHT_DARK, RDF_HIGHLIGHT_LIGHT } from '../lib/rdf/highlighter';
-import { isLargeOntologyGraph } from '../lib/ontologyScale';
+import {
+  BOUNDED_LABEL_ZOOM_THRESHOLD,
+  createGraphView,
+  DEFAULT_LARGE_GRAPH_DEPTH,
+  type GraphView,
+} from '../lib/graphView';
 import type { Catalogue } from '../types/catalogue';
 
 cytoscape.use(fcose);
@@ -266,23 +271,95 @@ interface EmbedGraphProps {
 function EmbedGraph({ ontology, theme, setSelected }: EmbedGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
-  const largeGraph = isLargeOntologyGraph(ontology);
+  const [searchInput, setSearchInput] = useState('');
+  const [search, setSearch] = useState('');
+  const [depth, setDepth] = useState(DEFAULT_LARGE_GRAPH_DEPTH);
+  const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const graphView = useMemo(
+    () => createGraphView(ontology, { search, depth, expandedNodeIds }),
+    [depth, expandedNodeIds, ontology, search],
+  );
+  const graphOntologyRef = useRef(ontology);
+
+  useEffect(() => {
+    if (graphOntologyRef.current === ontology) return;
+    graphOntologyRef.current = ontology;
+    setSearchInput('');
+    setSearch('');
+    setDepth(DEFAULT_LARGE_GRAPH_DEPTH);
+    setExpandedNodeIds(new Set());
+  }, [ontology]);
 
   const elements = useMemo(() => {
-    const nodes = ontology.entityTypes.map((e) => ({
-      data: { id: e.id, label: `${e.icon} ${e.name}`, color: e.color },
-    }));
-    const edges = ontology.relationships.map((r) => ({
-      data: {
-        id: r.id,
-        source: r.from,
-        target: r.to,
-        label: r.name,
-        kind: r.kind ?? 'association',
-      },
-    }));
+    const rootIds = new Set(graphView.rootIds);
+    const nodes = graphView.entities.map((entity) => {
+      const hiddenNeighborCount = graphView.hiddenNeighborCounts.get(entity.id) ?? 0;
+      return {
+        data: {
+          id: entity.id,
+          label: `${entity.icon} ${entity.name}${hiddenNeighborCount > 0 ? ` · +${hiddenNeighborCount}` : ''}`,
+          color: entity.color,
+          hiddenNeighborCount,
+          isRoot: rootIds.has(entity.id) ? 1 : 0,
+        },
+      };
+    });
+    const nodeIds = new Set(nodes.map((node) => node.data.id));
+    const edges = graphView.relationships
+      .filter((relationship) => (
+        nodeIds.has(relationship.from) && nodeIds.has(relationship.to)
+      ))
+      .map((relationship) => ({
+        data: {
+          id: relationship.id,
+          source: relationship.from,
+          target: relationship.to,
+          label: relationship.name,
+          kind: relationship.kind ?? 'association',
+        },
+      }));
     return [...nodes, ...edges];
-  }, [ontology]);
+  }, [graphView]);
+
+  const layout = useMemo<LayoutOptions>(() => {
+    if (graphView.mode === 'bounded') {
+      const visibleIds = new Set(
+        graphView.entities.map((entity) => entity.id),
+      );
+      const visibleRootIds = graphView.rootIds.filter(
+        (id) => visibleIds.has(id),
+      );
+      const roots = visibleRootIds.length > 0
+        ? visibleRootIds
+        : graphView.entities.slice(0, 1).map((entity) => entity.id);
+      return {
+          name: 'breadthfirst',
+          directed: false,
+          circle: true,
+          roots,
+          animate: false,
+          fit: true,
+          padding: 40,
+          spacingFactor: 1.6,
+        } as LayoutOptions;
+    }
+
+    return {
+      name: 'fcose',
+      quality: graphView.mode === 'dense' ? 'default' : 'proof',
+      randomize: true,
+      animate: false,
+      fit: true,
+      padding: 40,
+      nodeDimensionsIncludeLabels: true,
+      nodeRepulsion: () => graphView.mode === 'dense' ? 9_000 : 12_000,
+      idealEdgeLength: () => graphView.mode === 'dense' ? 140 : 180,
+      edgeElasticity: () => 0.45,
+      nodeSeparation: graphView.mode === 'dense' ? 60 : 80,
+    } as LayoutOptions;
+  }, [graphView.entities, graphView.mode, graphView.rootIds]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -296,19 +373,56 @@ function EmbedGraph({ ontology, theme, setSelected }: EmbedGraphProps) {
           style: {
             label: 'data(label)', 'text-valign': 'bottom', 'text-halign': 'center',
             'font-size': '13px', 'font-family': 'Segoe UI, sans-serif', 'font-weight': 600,
+            'min-zoomed-font-size': 9,
             color: theme.nodeText, 'text-margin-y': 8,
-            width: 60, height: 60, 'background-color': 'data(color)',
+            width: graphView.mode === 'bounded' ? 30 : 60,
+            height: graphView.mode === 'bounded' ? 30 : 60,
+            'background-color': 'data(color)',
             'border-width': 2, 'border-color': 'data(color)', 'border-opacity': 0.5,
           },
         },
         {
+          selector: 'node[hiddenNeighborCount > 0]',
+          style: {
+            'border-style': 'dashed',
+            'border-width': 4,
+            width: 38,
+            height: 38,
+            'min-zoomed-font-size': 8,
+          },
+        },
+        {
+          selector: 'node[isRoot = 1]',
+          style: {
+            'border-style': 'solid',
+            'border-width': 4,
+            width: 52,
+            height: 52,
+            'font-size': '14px',
+            'min-zoomed-font-size': 8,
+          },
+        },
+        {
+          selector: 'node.overview-label-hidden',
+          style: { label: '' },
+        },
+        {
           selector: 'node:selected',
-          style: { 'border-width': 4, 'border-color': theme.accent, width: 72, height: 72 },
+          style: {
+            'border-width': 4,
+            'border-color': theme.accent,
+            width: graphView.mode === 'bounded' ? 52 : 72,
+            height: graphView.mode === 'bounded' ? 52 : 72,
+            label: 'data(label)',
+            'min-zoomed-font-size': 0,
+          },
         },
         {
           selector: 'edge',
           style: {
-            label: largeGraph ? '' : 'data(label)', 'font-size': '11px', 'font-family': 'Segoe UI, sans-serif',
+            label: graphView.mode === 'full' ? 'data(label)' : '',
+            'font-size': '11px', 'font-family': 'Segoe UI, sans-serif',
+            'min-zoomed-font-size': 9,
             color: theme.edgeText, 'text-rotation': 'autorotate', 'text-margin-y': -8,
             width: 2, 'line-color': theme.edgeColor, 'target-arrow-color': theme.edgeColor,
             'target-arrow-shape': 'triangle', 'curve-style': 'unbundled-bezier',
@@ -321,54 +435,255 @@ function EmbedGraph({ ontology, theme, setSelected }: EmbedGraphProps) {
         },
         {
           selector: 'edge:selected',
-          style: { width: 4, 'line-color': theme.accent, 'target-arrow-color': theme.accent, color: theme.accent },
+          style: {
+            width: 4,
+            'line-color': theme.accent,
+            'target-arrow-color': theme.accent,
+            color: theme.accent,
+            label: 'data(label)',
+          },
         },
       ],
-      layout: (largeGraph
-        ? {
-            name: 'grid', animate: false, fit: true, padding: 30,
-          }
-        : {
-            name: 'fcose', quality: 'proof', randomize: true, animate: false,
-            fit: true, padding: 40, nodeDimensionsIncludeLabels: true,
-            nodeRepulsion: () => 12000, idealEdgeLength: () => 180,
-            edgeElasticity: () => 0.45, nodeSeparation: 80,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          }) as any,
+      layout,
       minZoom: 0.3, maxZoom: 3,
       userPanningEnabled: true,
       userZoomingEnabled: true,
       boxSelectionEnabled: false,
-      autoungrabify: true,   // read-only: nodes can't be dragged
+      autoungrabify: true,
     });
+
+    let boundedLabelsHidden: boolean | null = null;
+    const syncBoundedLabels = () => {
+      if (graphView.mode !== 'bounded') return;
+      const shouldHide = cy.zoom() < BOUNDED_LABEL_ZOOM_THRESHOLD;
+      if (shouldHide === boundedLabelsHidden) return;
+      boundedLabelsHidden = shouldHide;
+      cy.nodes('[isRoot = 0][hiddenNeighborCount = 0]')
+        .toggleClass('overview-label-hidden', shouldHide);
+    };
+    cy.on('zoom', syncBoundedLabels);
+    syncBoundedLabels();
 
     cy.on('tap', 'node', (evt: EventObject) => {
       const id = evt.target.id();
-      const entity = ontology.entityTypes.find((e) => e.id === id);
+      const entity = ontology.entityTypes.find((candidate) => candidate.id === id);
       if (entity) setSelected({ type: 'entity', entity });
     });
 
     cy.on('tap', 'edge', (evt: EventObject) => {
       const id = evt.target.id();
-      const rel = ontology.relationships.find((r) => r.id === id);
-      if (rel) setSelected({ type: 'relationship', relationship: rel });
+      const relationship = ontology.relationships.find(
+        (candidate) => candidate.id === id,
+      );
+      if (relationship) {
+        setSelected({ type: 'relationship', relationship });
+      }
     });
 
     cy.on('tap', (evt: EventObject) => {
       if (evt.target === cy) setSelected(null);
     });
 
+    cy.on('dbltap', 'node', (evt: EventObject) => {
+      if (graphView.mode !== 'bounded') return;
+      const id = evt.target.id();
+      if ((graphView.hiddenNeighborCounts.get(id) ?? 0) > 0) {
+        setExpandedNodeIds((current) => new Set(current).add(id));
+      }
+    });
+
     cyRef.current = cy;
     return () => { cy.destroy(); cyRef.current = null; };
-  }, [elements, largeGraph, theme, ontology, setSelected]);
+  }, [
+    elements,
+    graphView.hiddenNeighborCounts,
+    graphView.mode,
+    layout,
+    ontology,
+    setSelected,
+    theme,
+  ]);
+
+  const handleSearch = () => {
+    setSearch(searchInput.trim());
+    setExpandedNodeIds(new Set());
+    setSelected(null);
+  };
+
+  const handleOverview = () => {
+    setSearchInput('');
+    setSearch('');
+    setDepth(DEFAULT_LARGE_GRAPH_DEPTH);
+    setExpandedNodeIds(new Set());
+    setSelected(null);
+  };
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-      <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
-      {largeGraph && (
-        <div className="graph-scale-badge">Large ontology: using the fast grid layout</div>
+      <div
+        ref={containerRef}
+        data-testid="embed-graph-canvas"
+        style={{ width: '100%', height: '100%' }}
+      />
+      {graphView.mode === 'bounded' && (
+        <EmbedLargeGraphControls
+          graphView={graphView}
+          totalNodes={ontology.entityTypes.length}
+          totalEdges={ontology.relationships.length}
+          searchInput={searchInput}
+          appliedSearch={search}
+          depth={depth}
+          theme={theme}
+          onSearchInputChange={setSearchInput}
+          onSearch={handleSearch}
+          onDepthChange={setDepth}
+          onOverview={handleOverview}
+        />
       )}
     </div>
+  );
+}
+
+interface EmbedLargeGraphControlsProps {
+  graphView: GraphView;
+  totalNodes: number;
+  totalEdges: number;
+  searchInput: string;
+  appliedSearch: string;
+  depth: number;
+  theme: ThemeTokens;
+  onSearchInputChange: (value: string) => void;
+  onSearch: () => void;
+  onDepthChange: (depth: number) => void;
+  onOverview: () => void;
+}
+
+function EmbedLargeGraphControls({
+  graphView,
+  totalNodes,
+  totalEdges,
+  searchInput,
+  appliedSearch,
+  depth,
+  theme,
+  onSearchInputChange,
+  onSearch,
+  onDepthChange,
+  onOverview,
+}: EmbedLargeGraphControlsProps) {
+  const [collapsed, setCollapsed] = useState(false);
+  const buttonStyle: React.CSSProperties = {
+    padding: '5px 8px',
+    background: theme.bgTertiary,
+    color: theme.text,
+    border: `1px solid ${theme.border}`,
+    borderRadius: 4,
+    cursor: 'pointer',
+    fontSize: 11,
+  };
+  const inputStyle: React.CSSProperties = {
+    minWidth: 0,
+    padding: '6px 8px',
+    background: theme.bg,
+    color: theme.text,
+    border: `1px solid ${theme.border}`,
+    borderRadius: 4,
+    fontSize: 11,
+  };
+  const handleSubmit = (event: FormEvent) => {
+    event.preventDefault();
+    onSearch();
+  };
+
+  return (
+    <section
+      aria-label="Large ontology controls"
+      style={{
+        position: 'absolute',
+        zIndex: 2,
+        top: 8,
+        left: 8,
+        width: collapsed ? 'auto' : 'min(330px, calc(100% - 16px))',
+        boxSizing: 'border-box',
+        padding: collapsed ? '8px 10px' : 12,
+        background: theme.bgSecondary,
+        color: theme.text,
+        border: `1px solid ${theme.border}`,
+        borderRadius: 8,
+        boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
+        fontSize: 11,
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+        <div>
+          <strong style={{ fontSize: 12 }}>Semantic overview</strong>
+          {!collapsed && (
+            <div style={{ marginTop: 2, color: theme.textTertiary }}>
+              {graphView.visibleNodeCount} of {totalNodes} entities ·{' '}
+              {graphView.visibleEdgeCount} of {totalEdges} relationships
+            </div>
+          )}
+        </div>
+        <button
+          type="button"
+          style={buttonStyle}
+          aria-expanded={!collapsed}
+          onClick={() => setCollapsed((value) => !value)}
+        >
+          {collapsed ? 'Open' : 'Hide'}
+        </button>
+      </div>
+      {!collapsed && (
+        <>
+          <form onSubmit={handleSubmit} style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+            <input
+              type="search"
+              aria-label="Jump to an entity"
+              value={searchInput}
+              onChange={(event) => onSearchInputChange(event.target.value)}
+              placeholder="Name, ID, or description"
+              style={{ ...inputStyle, flex: 1 }}
+            />
+            <button type="submit" style={buttonStyle}>Find</button>
+          </form>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
+            <label htmlFor="embed-graph-depth" style={{ color: theme.textSecondary }}>
+              Detail
+            </label>
+            <select
+              id="embed-graph-depth"
+              value={depth}
+              onChange={(event) => onDepthChange(Number(event.target.value))}
+              style={inputStyle}
+            >
+              <option value={1}>1 hop</option>
+              <option value={2}>2 hops</option>
+              <option value={3}>3 hops</option>
+              <option value={4}>4 hops</option>
+            </select>
+            <button type="button" style={{ ...buttonStyle, marginLeft: 'auto' }} onClick={onOverview}>
+              Overview
+            </button>
+          </div>
+          {appliedSearch && (
+            <div
+              role={graphView.searchMatchCount === 0 ? 'alert' : 'status'}
+              style={{
+                marginTop: 8,
+                color: graphView.searchMatchCount === 0 ? '#D83B01' : theme.textSecondary,
+              }}
+            >
+              {graphView.searchMatchCount === 0
+                ? 'No match. Showing hierarchy roots.'
+                : `${graphView.searchMatchCount} matching ${graphView.searchMatchCount === 1 ? 'entity' : 'entities'}.`}
+            </div>
+          )}
+          <div style={{ marginTop: 8, color: theme.textTertiary, lineHeight: 1.35 }}>
+            “+N” marks hidden neighbors. Double-click to reveal one more hop.
+          </div>
+        </>
+      )}
+    </section>
   );
 }
 
