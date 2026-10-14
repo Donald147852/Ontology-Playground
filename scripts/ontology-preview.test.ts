@@ -1,10 +1,23 @@
-import { describe, expect, it } from 'vitest';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
 import { catalogueIdFromPath, entriesFromNameStatus } from './list-changed-catalogue-entries';
 import {
+  preparePreviewAssets,
   validateManifest,
   type RenderedManifest,
   type TrustedPreviewRun,
 } from './prepare-ontology-preview-assets';
+
+const temporaryDirectories: string[] = [];
+
+afterEach(() => {
+  for (const directory of temporaryDirectories) {
+    rmSync(directory, { recursive: true, force: true });
+  }
+  temporaryDirectories.length = 0;
+});
 
 describe('ontology preview changed-entry detection', () => {
   it('maps catalogue paths to compiler-compatible ids', () => {
@@ -119,5 +132,39 @@ describe('ontology preview artifact authentication', () => {
         },
       ],
     }, trustedRun)).toThrow(/filename does not match catalogue ID/);
+  });
+
+  it('creates a publishable sanitized package when there are no previews', () => {
+    const root = mkdtempSync(join(tmpdir(), 'ontology-preview-'));
+    temporaryDirectories.push(root);
+    const manifestPath = join(root, 'manifest.json');
+    const publishDir = join(root, 'publish');
+    const commentPath = join(root, 'comment.md');
+    const zeroPreviewManifest: RenderedManifest = {
+      ...trustedRun,
+      previews: [],
+    };
+    writeFileSync(manifestPath, JSON.stringify(zeroPreviewManifest), 'utf-8');
+
+    preparePreviewAssets({
+      manifest: manifestPath,
+      artifactDir: join(root, 'artifact'),
+      publishDir,
+      comment: commentPath,
+      branch: 'ontology-preview-assets',
+      expectedRun: trustedRun,
+    });
+
+    const sanitizedManifest = join(
+      publishDir,
+      `pr-${trustedRun.prNumber}`,
+      trustedRun.headSha,
+      'manifest.json',
+    );
+    expect(existsSync(sanitizedManifest)).toBe(true);
+    expect(JSON.parse(readFileSync(sanitizedManifest, 'utf-8'))).toEqual(zeroPreviewManifest);
+    expect(readFileSync(commentPath, 'utf-8')).toContain(
+      'No changed catalogue ontology entries were detected in this PR.',
+    );
   });
 });

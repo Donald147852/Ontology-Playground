@@ -22,7 +22,7 @@ export interface TrustedPreviewRun {
   repository: string;
 }
 
-interface CliOptions {
+export interface PreparePreviewOptions {
   manifest: string;
   artifactDir: string;
   publishDir: string;
@@ -37,7 +37,7 @@ const SHA_RE = /^[a-f0-9]{40}$/i;
 const REPOSITORY_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
-function parseArgs(argv: string[]): CliOptions {
+function parseArgs(argv: string[]): PreparePreviewOptions {
   const values = new Map<string, string>();
   for (let index = 0; index < argv.length; index += 2) {
     const key = argv[index];
@@ -149,8 +149,7 @@ export function validateManifest(
   }
 }
 
-function main() {
-  const options = parseArgs(process.argv.slice(2));
+export function preparePreviewAssets(options: PreparePreviewOptions) {
   const manifest: unknown = JSON.parse(readFileSync(options.manifest, 'utf-8'));
   validateManifest(manifest, options.expectedRun);
 
@@ -180,6 +179,18 @@ function main() {
     imageLines.push(`### ${preview.id}\n\n![${preview.id}](${imageUrl})`);
   }
 
+  const sanitizedManifest: RenderedManifest = {
+    prNumber: manifest.prNumber,
+    headSha: manifest.headSha,
+    repository: manifest.repository,
+    previews: manifest.previews,
+  };
+  writeFileSync(
+    join(targetDir, 'manifest.json'),
+    `${JSON.stringify(sanitizedManifest, null, 2)}\n`,
+    'utf-8',
+  );
+
   const body = [
     '<!-- ontology-preview-render -->',
     '## Ontology Preview',
@@ -196,6 +207,10 @@ function main() {
   if (options.githubOutput) {
     writeFileSync(options.githubOutput, `pr_number=${manifest.prNumber}\nasset_path=${targetPath}\n`, { flag: 'a' });
   }
+}
+
+function main() {
+  preparePreviewAssets(parseArgs(process.argv.slice(2)));
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
