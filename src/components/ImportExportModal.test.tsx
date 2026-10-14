@@ -74,14 +74,14 @@ describe('ImportExportModal integration', () => {
     useAppStore.getState().resetToDefault();
   });
 
-  it('offers distinct Playground and OWL plus SHACL export profiles', async () => {
+  it('offers distinct Playground and standards-oriented export profiles', async () => {
     render(<ImportExportModal onClose={onClose} />);
 
     const playgroundProfile = screen.getByRole('button', {
       name: /Playground round-trip/,
     });
     const standardsProfile = screen.getByRole('button', {
-      name: /OWL \+ SHACL interoperability/,
+      name: /Standards-oriented OWL \+ SHACL/,
     });
 
     expect(playgroundProfile.getAttribute('aria-pressed')).toBe('true');

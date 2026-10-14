@@ -294,19 +294,29 @@ describe('RDF round-trip tests', () => {
     };
 
     const rdf = serializeToRDF(ontology, [], { profile: 'standards' });
-    const datatypePropertyPattern =
-      / {4}<owl:DatatypeProperty[\s\S]*? {4}<\/owl:DatatypeProperty>\n\n/g;
-    const datatypeProperties = rdf.match(datatypePropertyPattern) ?? [];
-    const reordered = rdf
-      .replace(datatypePropertyPattern, '')
-      .replace(
-        '</rdf:RDF>',
-        `${datatypeProperties.reverse().join('')}</rdf:RDF>`,
-      );
+    const document = new DOMParser().parseFromString(rdf, 'application/xml');
+    const elements = Array.from(document.querySelectorAll('*'));
+    for (const element of elements) {
+      const children = Array.from(element.children);
+      children.reverse().forEach((child) => element.appendChild(child));
+    }
+    const reordered = new XMLSerializer().serializeToString(document);
 
     const { ontology: parsed } = parseRDF(reordered);
+    const normalizeResourceOrder = (value: Ontology): Ontology => ({
+      ...value,
+      entityTypes: [...value.entityTypes].sort((left, right) => (
+        left.id.localeCompare(right.id)
+      )),
+      relationships: [...value.relationships].sort((left, right) => (
+        left.id.localeCompare(right.id)
+      )),
+    });
 
-    expectOntologiesEqual(parsed, ontology);
+    expectOntologiesEqual(
+      normalizeResourceOrder(parsed),
+      normalizeResourceOrder(ontology),
+    );
     expect(parsed.relationships.filter((relationship) => (
       relationship.name === 'related to'
     ))).toHaveLength(2);

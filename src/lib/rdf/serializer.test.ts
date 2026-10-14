@@ -297,7 +297,7 @@ describe('serializeToRDF', () => {
     );
   });
 
-  it('emits an OWL and SHACL interoperability profile without Playground metadata', () => {
+  it('emits a standards-oriented OWL and SHACL profile without Playground metadata', () => {
     const ontology: Ontology = {
       name: 'Standards',
       description: 'Standards profile',
@@ -339,11 +339,46 @@ describe('serializeToRDF', () => {
     expect(rdf).toContain('xmlns:sh="http://www.w3.org/ns/shacl#"');
     expect(rdf).toContain('<owl:hasKey rdf:parseType="Collection">');
     expect(rdf).toContain('<sh:order rdf:datatype=');
-    expect(rdf).toContain('<sh:in rdf:nodeID="list-account-tier-0"/>');
+    expect(rdf).toContain('<sh:in rdf:nodeID="list-enum-0-1-0"/>');
     expect(rdf).toContain('<sh:maxCount rdf:datatype=');
     expect(rdf).toContain('rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#Statement"');
     expect(rdf).toContain('owned_by_attribute_since');
     expect(rdf).not.toContain('xmlns:opmeta=');
     expect(rdf).not.toContain('<opmeta:');
+  });
+
+  it('uses distinct RDF lists when enum property names produce the same slug', () => {
+    const ontology: Ontology = {
+      name: 'Enum Lists',
+      description: '',
+      entityTypes: [
+        {
+          id: 'a-b',
+          name: 'First',
+          description: '',
+          icon: 'A',
+          color: '#111',
+          properties: [{ name: 'c', type: 'enum', values: ['First'] }],
+        },
+        {
+          id: 'a',
+          name: 'Second',
+          description: '',
+          icon: 'B',
+          color: '#222',
+          properties: [{ name: 'b-c', type: 'enum', values: ['Second'] }],
+        },
+      ],
+      relationships: [],
+    };
+
+    const rdf = serializeToRDF(ontology, [], { profile: 'standards' });
+    const listNodeIds = Array.from(
+      rdf.matchAll(/<sh:in rdf:nodeID="([^"]+)"\/>/g),
+      (match) => match[1],
+    );
+
+    expect(listNodeIds).toHaveLength(2);
+    expect(new Set(listNodeIds).size).toBe(2);
   });
 });

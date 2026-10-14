@@ -254,6 +254,7 @@ The table below lists the main end-user and contributor guides. Internal plannin
 | Guide | Description |
 |-------|-------------|
 | [Ontology Authoring Guide](docs/authoring-guide.md) | How to create ontologies that work well in the Playground — field-by-field reference, best practices, and a step-by-step walkthrough |
+| [RDF Export Profiles](docs/rdf-export-profiles.md) | When to use the lossless Playground round-trip profile or the standards-oriented OWL + SHACL profile |
 | [Contribute an Ontology: From Design to GitHub](docs/contributing-ontology-from-design-to-github.md) | End-to-end contributor workflow: design, RDF export, metadata, local validation, and pull request |
 | [Embedding Guide](docs/embed-guide.md) | How to embed interactive ontology widgets on any web page |
 | [GitHub OAuth Setup](docs/github-oauth-setup.md) | How to configure GitHub OAuth for one-click catalogue PRs |

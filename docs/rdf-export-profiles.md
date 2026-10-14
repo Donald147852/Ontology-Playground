@@ -31,11 +31,11 @@ This profile is valid RDF/XML, but its Playground metadata requires knowledge of
 the project vocabulary. It is intended for lossless editor round trips rather
 than as a standards-neutral interchange contract.
 
-## OWL + SHACL interoperability
+## Standards-oriented OWL + SHACL
 
-The **OWL + SHACL interoperability** profile omits Playground-only presentation
-and binding metadata. It represents the supported domain model with standard
-vocabularies:
+The **standards-oriented OWL + SHACL** profile omits Playground-only
+presentation and binding metadata. It represents the supported domain model
+with standard vocabularies:
 
 | Model feature | Representation |
 | --- | --- |
@@ -69,15 +69,17 @@ restrictions.
 
 The importer understands the generated OWL, SHACL order, enum lists,
 `owl:hasKey`, cardinality shapes, and association classes. Statement order may
-change in a triplestore without changing the reconstructed property order.
+change in a triplestore without changing the reconstructed property order. It
+also accepts equivalent RDF/XML that references RDF lists and inverse SHACL
+paths through blank nodes.
 
-Both profiles retain ontology IRI, version, license, and `owl:imports` metadata.
-Imports are recorded but never fetched. SHACL constraints are parsed only for
-the supported visual model; the Playground does not execute a SHACL validation
-engine.
+Both profiles mint a generated base IRI from the ontology name and retain the
+ontology label and description. The editable model does not currently retain
+an imported ontology IRI, version, license statement, `owl:imports`, or
+unsupported source triples. SHACL constraints are parsed only for the supported
+visual model; the Playground does not execute a SHACL validation engine.
 
-The interoperability profile intentionally omits icons, colors, units, data
+The standards-oriented profile intentionally omits icons, colors, units, data
 bindings, and other editor-only values that have no selected standards mapping.
-Use the round-trip profile when those values must be preserved. Catalogue
-entries also retain their separate byte-exact reviewed source; neither generated
-profile substitutes for that original artifact.
+Use the round-trip profile when those values must be preserved. Neither
+generated profile substitutes for retaining the original imported source file.

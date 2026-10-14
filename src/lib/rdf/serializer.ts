@@ -32,13 +32,13 @@ const PLAYGROUND_ANNOTATIONS = {
   color: 'Presentation color for an entity type.',
   isIdentifier: 'Whether an entity property is used as its Playground identifier.',
   unit: 'Display unit associated with a numeric property.',
-  enumValues: 'Comma-delimited enum values used by legacy Playground round trips.',
-  propertyType: 'Playground property type used to reconstruct the editor model.',
+  enumValues: 'Comma-delimited enum values used only by Playground round trips.',
+  propertyType: 'Playground property type: string, integer, decimal, double, date, datetime, boolean, or enum.',
   cardinality: 'Playground relationship multiplicity: one-to-one, one-to-many, many-to-one, or many-to-many.',
   fromEntityId: 'Playground ID of a relationship source entity.',
   toEntityId: 'Playground ID of a relationship target entity.',
   relationshipAttributeOf: 'Playground ID of the relationship described by an attribute.',
-  attributeType: 'Playground scalar type of a relationship attribute.',
+  attributeType: 'Playground relationship attribute type: string, integer, decimal, double, date, datetime, boolean, or enum.',
   boundClass: 'Domain class targeted by a Playground data binding.',
   boundEntityId: 'Playground entity ID targeted by a data binding.',
   source: 'Source name retained by a Playground data binding.',
@@ -278,7 +278,7 @@ export function serializeStandardsRDF(ontology: Ontology): string {
   let rdf = '<?xml version="1.0" encoding="UTF-8"?>\n';
   rdf += serializeNamespaces(baseUri, true, false);
   rdf += serializeOntologyDeclaration(ontology, baseUri);
-  rdf += '    <!-- OWL + SHACL interoperability profile. Playground-only UI metadata and bindings are omitted. -->\n\n';
+  rdf += '    <!-- Standards-oriented OWL + SHACL profile. Playground-only UI metadata and bindings are omitted. -->\n\n';
 
   for (const entity of ontology.entityTypes) {
     const classIri = baseUri + capitalize(entity.id);
@@ -368,11 +368,11 @@ export function serializeStandardsRDF(ontology: Ontology): string {
   }
 
   rdf += '    <!-- SHACL property order, enums, identifiers, and relationship cardinality -->\n';
-  for (const entity of ontology.entityTypes) {
+  for (const [entityIndex, entity] of ontology.entityTypes.entries()) {
     const classIri = baseUri + capitalize(entity.id);
     entity.properties.forEach((property, propertyIndex) => {
       const iri = propertyIri(baseUri, entity.id, property.name);
-      const shapeIri = `${baseUri}shape_${entity.id}_${property.name}`;
+      const shapeIri = `${baseUri}shape_property_${entityIndex}_${propertyIndex}`;
       const xsdType = XSD_TYPE_MAP[property.type] || 'string';
       rdf += `    <sh:PropertyShape rdf:about="${escapeXml(shapeIri)}">\n`;
       rdf += `        <sh:targetClass rdf:resource="${escapeXml(classIri)}"/>\n`;
@@ -384,7 +384,7 @@ export function serializeStandardsRDF(ontology: Ontology): string {
         rdf += `        <sh:maxCount rdf:datatype="${XSD_NS}integer">1</sh:maxCount>\n`;
       }
       if (property.values && property.values.length > 0) {
-        const prefix = `${entity.id}-${property.name}`;
+        const prefix = `enum-${entityIndex}-${propertyIndex}`;
         rdf += `        <sh:in rdf:nodeID="${listNodeId(prefix, 0)}"/>\n`;
         enumLists.push({ prefix, values: property.values });
       }

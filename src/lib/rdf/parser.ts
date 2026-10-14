@@ -159,6 +159,7 @@ function isValidCardinality(c: string): c is Cardinality {
 const RDF_NS = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#';
 const RDFS_NS = 'http://www.w3.org/2000/01/rdf-schema#';
 const OWL_NS = 'http://www.w3.org/2002/07/owl#';
+const SHACL_NS = 'http://www.w3.org/ns/shacl#';
 
 /**
  * Collect all elements declaring a resource of the given type, supporting both
@@ -171,12 +172,21 @@ const OWL_NS = 'http://www.w3.org/2002/07/owl#';
  * Many serializers (e.g. Python's rdflib, used by Brick and other published
  * ontologies) emit only the second form, which we previously ignored (#85).
  */
-function indexDescriptionTypes(root: Element): Map<string, Element[]> {
-  const index = new Map<string, Element[]>();
+interface RdfNodeIndex {
+  descriptionsByType: Map<string, Element[]>;
+  nodesById: Map<string, Element>;
+}
+
+function indexRdfNodes(root: Element): RdfNodeIndex {
+  const descriptionsByType = new Map<string, Element[]>();
+  const nodesById = new Map<string, Element>();
   const descriptions = root.getElementsByTagNameNS(RDF_NS, 'Description');
 
   for (let i = 0; i < descriptions.length; i++) {
     const element = descriptions[i];
+    const nodeId = getRdfAttribute(element, 'nodeID');
+    if (nodeId) nodesById.set(nodeId, element);
+
     const indexedTypes = new Set<string>();
     for (let j = 0; j < element.children.length; j++) {
       const child = element.children[j];
@@ -185,13 +195,19 @@ function indexDescriptionTypes(root: Element): Map<string, Element[]> {
         child.getAttribute('rdf:resource') || child.getAttributeNS(RDF_NS, 'resource');
       if (!resource || indexedTypes.has(resource)) continue;
       indexedTypes.add(resource);
-      const elements = index.get(resource) ?? [];
+      const elements = descriptionsByType.get(resource) ?? [];
       elements.push(element);
-      index.set(resource, elements);
+      descriptionsByType.set(resource, elements);
     }
   }
 
-  return index;
+  const lists = root.getElementsByTagNameNS(RDF_NS, 'List');
+  for (let i = 0; i < lists.length; i++) {
+    const nodeId = getRdfAttribute(lists[i], 'nodeID');
+    if (nodeId) nodesById.set(nodeId, lists[i]);
+  }
+
+  return { descriptionsByType, nodesById };
 }
 
 function getTypedElements(
@@ -222,13 +238,27 @@ function getDirectChild(parent: Element, localName: string): Element | null {
   return null;
 }
 
-function getCollectionResources(parent: Element, localName: string): string[] {
+function getCollectionResources(
+  parent: Element,
+  localName: string,
+  nodesById: ReadonlyMap<string, Element>,
+): string[] {
   const collection = getDirectChild(parent, localName);
   if (!collection) return [];
 
+  const listNodeId = getRdfAttribute(collection, 'nodeID');
+  if (listNodeId) {
+    return (parseRdfList(listNodeId, nodesById) ?? [])
+      .map((item) => item.resource)
+      .filter((resource): resource is string => Boolean(resource));
+  }
+
   const resources: string[] = [];
   for (let i = 0; i < collection.children.length; i++) {
-    const resource = getRdfAttribute(collection.children[i], 'about');
+    const resource = (
+      getRdfAttribute(collection.children[i], 'about')
+      || getRdfAttribute(collection.children[i], 'resource')
+    );
     if (resource) resources.push(resource);
   }
   return resources;
@@ -243,48 +273,50 @@ interface ShaclPathMetadata {
   order?: number;
 }
 
-function parseRdfLiteralLists(root: Element): Map<string, string[]> {
-  const listNodes = new Map<string, Element>();
-  const descriptions = root.getElementsByTagNameNS(RDF_NS, 'Description');
-  for (let i = 0; i < descriptions.length; i++) {
-    const nodeId = getRdfAttribute(descriptions[i], 'nodeID');
-    if (nodeId) listNodes.set(nodeId, descriptions[i]);
+interface RdfListItem {
+  literal: string | null;
+  resource: string | null;
+}
+
+function parseRdfList(
+  startNodeId: string,
+  nodesById: ReadonlyMap<string, Element>,
+): RdfListItem[] | null {
+  const values: RdfListItem[] = [];
+  const visited = new Set<string>();
+  let nodeId: string | null = startNodeId;
+
+  while (nodeId && !visited.has(nodeId)) {
+    visited.add(nodeId);
+    const node = nodesById.get(nodeId);
+    if (!node) return null;
+
+    const first = getDirectChild(node, 'first');
+    const rest = getDirectChild(node, 'rest');
+    if (!first || !rest) return null;
+
+    const resource = getRdfAttribute(first, 'resource');
+    values.push({
+      literal: resource ? null : first.textContent,
+      resource,
+    });
+
+    const restResource = getRdfAttribute(rest, 'resource');
+    if (restResource === `${RDF_NS}nil`) return values;
+
+    nodeId = getRdfAttribute(rest, 'nodeID');
+    if (!nodeId) return null;
   }
 
-  const lists = new Map<string, string[]>();
-  for (const startNodeId of listNodes.keys()) {
-    const values: string[] = [];
-    const visited = new Set<string>();
-    let nodeId: string | null = startNodeId;
-
-    while (nodeId && !visited.has(nodeId)) {
-      visited.add(nodeId);
-      const node = listNodes.get(nodeId);
-      if (!node) break;
-
-      const first = getDirectChild(node, 'first');
-      if (first?.textContent !== null && first?.textContent !== undefined) {
-        values.push(first.textContent);
-      }
-
-      const rest = getDirectChild(node, 'rest');
-      if (!rest) break;
-      const restResource = getRdfAttribute(rest, 'resource');
-      if (restResource === `${RDF_NS}nil`) break;
-      nodeId = getRdfAttribute(rest, 'nodeID');
-    }
-
-    if (values.length > 0) lists.set(startNodeId, values);
-  }
-  return lists;
+  return null;
 }
 
 function parseShaclPathMetadata(
   root: Element,
   descriptionTypeIndex: Map<string, Element[]>,
+  nodesById: ReadonlyMap<string, Element>,
 ): Map<string, ShaclPathMetadata> {
   const metadataByPath = new Map<string, ShaclPathMetadata>();
-  const lists = parseRdfLiteralLists(root);
   const propertyShapes = getTypedElements(
     root,
     SHACL_NS,
@@ -296,10 +328,24 @@ function parseShaclPathMetadata(
     const path = getDirectChild(shape, 'path');
     if (!path) continue;
 
-    let pathUri = getRdfAttribute(path, 'resource');
+    const inlinePathNode = path.children.length === 1
+      ? path.children[0]
+      : undefined;
+    let pathUri = (
+      getRdfAttribute(path, 'resource')
+      || (inlinePathNode ? getRdfAttribute(inlinePathNode, 'about') : null)
+    );
     let inverse = false;
     if (!pathUri) {
-      const inversePath = getDirectChild(path, 'inversePath');
+      const pathNodeId = getRdfAttribute(path, 'nodeID');
+      const pathNode = (
+        (pathNodeId ? nodesById.get(pathNodeId) : undefined)
+        || inlinePathNode
+      );
+      const inversePath = (
+        getDirectChild(path, 'inversePath')
+        || (pathNode ? getDirectChild(pathNode, 'inversePath') : null)
+      );
       pathUri = inversePath ? getRdfAttribute(inversePath, 'resource') : null;
       inverse = Boolean(pathUri);
     }
@@ -327,8 +373,14 @@ function parseShaclPathMetadata(
 
       const inList = getDirectChild(shape, 'in');
       const listNodeId = inList ? getRdfAttribute(inList, 'nodeID') : null;
-      if (listNodeId && lists.has(listNodeId)) {
-        metadata.enumValues = lists.get(listNodeId);
+      const list = listNodeId ? parseRdfList(listNodeId, nodesById) : null;
+      if (list) {
+        const enumValues = list
+          .map((item) => item.literal)
+          .filter((value): value is string => value !== null);
+        if (enumValues.length === list.length) {
+          metadata.enumValues = enumValues;
+        }
       }
     }
 
@@ -389,8 +441,13 @@ export function parseRDF(rdfXml: string): { ontology: Ontology; bindings: DataBi
   }
 
   const root = doc.documentElement;
-  const descriptionTypeIndex = indexDescriptionTypes(root);
-  const shaclPathMetadata = parseShaclPathMetadata(root, descriptionTypeIndex);
+  const rdfNodeIndex = indexRdfNodes(root);
+  const descriptionTypeIndex = rdfNodeIndex.descriptionsByType;
+  const shaclPathMetadata = parseShaclPathMetadata(
+    root,
+    descriptionTypeIndex,
+    rdfNodeIndex.nodesById,
+  );
 
   // --- Extract ontology metadata ---
   let ontologyName = '';
@@ -439,7 +496,11 @@ export function parseRDF(rdfXml: string): { ontology: Ontology; bindings: DataBi
       );
     }
 
-    const identifierProperties = getCollectionResources(el, 'hasKey');
+    const identifierProperties = getCollectionResources(
+      el,
+      'hasKey',
+      rdfNodeIndex.nodesById,
+    );
     if (identifierProperties.length > 0) {
       identifierPropertiesByClass.set(about, new Set(identifierProperties));
     }

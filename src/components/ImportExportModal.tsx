@@ -528,7 +528,7 @@ export function ImportExportModal({ onClose, onFabricPush }: ImportExportModalPr
                     Playground round-trip
                   </span>
                   <span style={{ color: 'var(--text-tertiary)', display: 'block', fontSize: 10, marginTop: 2 }}>
-                    Preserves editor layout, bindings, and other Playground metadata.
+                    Preserves icons, colors, bindings, and other Playground metadata.
                   </span>
                 </button>
                 <button
@@ -552,7 +552,7 @@ export function ImportExportModal({ onClose, onFabricPush }: ImportExportModalPr
                   }}
                 >
                   <span style={{ display: 'block', fontSize: 12, fontWeight: 600 }}>
-                    OWL + SHACL interoperability
+                    Standards-oriented OWL + SHACL
                   </span>
                   <span style={{ color: 'var(--text-tertiary)', display: 'block', fontSize: 10, marginTop: 2 }}>
                     Uses standard vocabulary for order, enums, identifiers, and cardinality.

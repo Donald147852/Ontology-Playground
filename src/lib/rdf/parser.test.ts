@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { parseRDF, RDFParseError } from './parser';
 
+const RDF_NS = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#';
+const XSD_NS = 'http://www.w3.org/2001/XMLSchema#';
+
 describe('parseRDF', () => {
   const minimalRdf = `<?xml version="1.0" encoding="UTF-8"?>
 <rdf:RDF
@@ -726,6 +729,122 @@ describe('parseRDF', () => {
       expect(ontology.relationships.map((relationship) => relationship.id)).toContain(
         'hVAC-subClassOf-equipment-2'
       );
+    });
+  });
+
+  describe('standards-tool RDF/XML forms', () => {
+    it('parses referenced RDF lists and inverse SHACL path nodes', () => {
+      const rdf = `<?xml version="1.0"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+         xmlns:owl="http://www.w3.org/2002/07/owl#"
+         xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+         xmlns:sh="http://www.w3.org/ns/shacl#">
+  <owl:Ontology rdf:about="http://example.org/interop/">
+    <rdfs:label>Interoperability</rdfs:label>
+  </owl:Ontology>
+  <owl:Class rdf:about="http://example.org/interop/Person">
+    <rdfs:label>Person</rdfs:label>
+    <owl:hasKey rdf:nodeID="key-list"/>
+  </owl:Class>
+  <owl:Class rdf:about="http://example.org/interop/Team">
+    <rdfs:label>Team</rdfs:label>
+  </owl:Class>
+  <owl:DatatypeProperty rdf:about="http://example.org/interop/person_personId">
+    <rdfs:label>personId</rdfs:label>
+    <rdfs:domain rdf:resource="http://example.org/interop/Person"/>
+    <rdfs:range rdf:resource="${XSD_NS}string"/>
+  </owl:DatatypeProperty>
+  <owl:DatatypeProperty rdf:about="http://example.org/interop/person_status">
+    <rdfs:label>status</rdfs:label>
+    <rdfs:domain rdf:resource="http://example.org/interop/Person"/>
+    <rdfs:range rdf:resource="${XSD_NS}string"/>
+  </owl:DatatypeProperty>
+  <owl:ObjectProperty rdf:about="http://example.org/interop/memberOf">
+    <rdfs:label>member of</rdfs:label>
+    <rdfs:domain rdf:resource="http://example.org/interop/Person"/>
+    <rdfs:range rdf:resource="http://example.org/interop/Team"/>
+  </owl:ObjectProperty>
+  <sh:PropertyShape rdf:about="http://example.org/interop/idShape">
+    <sh:path rdf:resource="http://example.org/interop/person_personId"/>
+    <sh:order rdf:datatype="${XSD_NS}decimal">0</sh:order>
+  </sh:PropertyShape>
+  <sh:PropertyShape rdf:about="http://example.org/interop/statusShape">
+    <sh:path rdf:resource="http://example.org/interop/person_status"/>
+    <sh:order rdf:datatype="${XSD_NS}decimal">1</sh:order>
+    <sh:in rdf:nodeID="enum-list-1"/>
+  </sh:PropertyShape>
+  <sh:PropertyShape rdf:about="http://example.org/interop/memberForward">
+    <sh:path rdf:resource="http://example.org/interop/memberOf"/>
+    <sh:maxCount rdf:datatype="${XSD_NS}integer">1</sh:maxCount>
+  </sh:PropertyShape>
+  <sh:PropertyShape rdf:about="http://example.org/interop/memberInverse">
+    <sh:path rdf:nodeID="inverse-member-path"/>
+    <sh:maxCount rdf:datatype="${XSD_NS}integer">1</sh:maxCount>
+  </sh:PropertyShape>
+  <rdf:Description rdf:nodeID="key-list">
+    <rdf:first rdf:resource="http://example.org/interop/person_personId"/>
+    <rdf:rest rdf:resource="${RDF_NS}nil"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="enum-list-1">
+    <rdf:first rdf:datatype="${XSD_NS}string">Active</rdf:first>
+    <rdf:rest rdf:nodeID="enum-list-2"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="enum-list-2">
+    <rdf:first rdf:datatype="${XSD_NS}string">Inactive</rdf:first>
+    <rdf:rest rdf:resource="${RDF_NS}nil"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="inverse-member-path">
+    <sh:inversePath rdf:resource="http://example.org/interop/memberOf"/>
+  </rdf:Description>
+</rdf:RDF>`;
+
+      const { ontology } = parseRDF(rdf);
+      const person = ontology.entityTypes.find((entity) => entity.id === 'person');
+
+      expect(person?.properties.map((property) => property.name)).toEqual([
+        'personId',
+        'status',
+      ]);
+      expect(person?.properties[0].isIdentifier).toBe(true);
+      expect(person?.properties[1]).toMatchObject({
+        type: 'enum',
+        values: ['Active', 'Inactive'],
+      });
+      expect(ontology.relationships[0]).toMatchObject({
+        id: 'memberOf',
+        cardinality: 'one-to-one',
+      });
+    });
+
+    it('does not coerce resource-valued SHACL lists into string enums', () => {
+      const rdf = `<?xml version="1.0"?>
+<rdf:RDF xmlns:rdf="${RDF_NS}"
+         xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+         xmlns:owl="http://www.w3.org/2002/07/owl#"
+         xmlns:sh="http://www.w3.org/ns/shacl#">
+  <owl:Class rdf:about="http://example.org/Item"/>
+  <sh:PropertyShape rdf:about="http://example.org/statusShape">
+    <sh:path>
+      <owl:DatatypeProperty rdf:about="http://example.org/item_status">
+        <rdfs:label>status</rdfs:label>
+        <rdfs:domain rdf:resource="http://example.org/Item"/>
+      </owl:DatatypeProperty>
+    </sh:path>
+    <sh:in rdf:nodeID="status-list"/>
+  </sh:PropertyShape>
+  <rdf:Description rdf:nodeID="status-list">
+    <rdf:first rdf:resource="http://example.org/Active"/>
+    <rdf:rest rdf:resource="${RDF_NS}nil"/>
+  </rdf:Description>
+</rdf:RDF>`;
+
+      const { ontology } = parseRDF(rdf);
+      expect(ontology.entityTypes[0].properties[0]).toMatchObject({
+        name: 'status',
+        type: 'string',
+      });
+      expect(ontology.entityTypes[0].properties[0].values).toBeUndefined();
     });
   });
 });
