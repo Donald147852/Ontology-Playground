@@ -29,7 +29,9 @@ the live search bar to filter entities and relationships.
 A curated library of official and community-contributed ontologies spanning six
 domains (Retail, E-Commerce, Healthcare, Finance, Manufacturing, Education).
 Browse by category, search by name or tags, load any ontology with one click,
-and view its RDF source. Every ontology has a shareable deep link
+and view its RDF source. Catalogue cards preserve and display available
+license, upstream source, and version attribution for external standards and
+adapted community entries. Every ontology has a shareable deep link
 (`/#/catalogue/official/cosmic-coffee`).
 
 ### Visual Ontology Designer

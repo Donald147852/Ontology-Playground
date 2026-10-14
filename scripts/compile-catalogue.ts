@@ -33,6 +33,9 @@ interface CatalogueMetadata {
   category: string;
   tags?: string[];
   author?: string;
+  license?: string;
+  sourceUrl?: string;
+  version?: string;
 }
 
 // ------------------------------------------------------------------
@@ -42,7 +45,11 @@ interface CatalogueMetadata {
 const REQUIRED_METADATA_FIELDS = ['name', 'description', 'category'] as const;
 const VALID_CATEGORIES = ['retail', 'healthcare', 'finance', 'manufacturing', 'education', 'food', 'media', 'events', 'technology', 'general', 'iq-lab', 'school', 'fibo'];
 
-function validateMetadata(meta: unknown, filePath: string): CatalogueMetadata {
+function validateMetadata(
+  meta: unknown,
+  filePath: string,
+  source: CatalogueEntry['source'],
+): CatalogueMetadata {
   if (typeof meta !== 'object' || meta === null) {
     throw new Error(`${filePath}: metadata.json must be a JSON object`);
   }
@@ -56,6 +63,37 @@ function validateMetadata(meta: unknown, filePath: string): CatalogueMetadata {
     throw new Error(
       `${filePath}: invalid category "${obj['category']}". Must be one of: ${VALID_CATEGORIES.join(', ')}`,
     );
+  }
+  for (const field of ['license', 'sourceUrl', 'version'] as const) {
+    if (
+      obj[field] !== undefined
+      && (typeof obj[field] !== 'string' || obj[field].trim().length === 0)
+    ) {
+      throw new Error(`${filePath}: metadata.json field "${field}" must be a non-empty string`);
+    }
+  }
+  if (source === 'external') {
+    for (const field of ['license', 'sourceUrl'] as const) {
+      if (typeof obj[field] !== 'string' || obj[field].trim().length === 0) {
+        throw new Error(`${filePath}: external catalogue metadata requires "${field}"`);
+      }
+    }
+  }
+  if (typeof obj['sourceUrl'] === 'string') {
+    try {
+      const sourceUrl = new URL(obj['sourceUrl']);
+      if (
+        sourceUrl.protocol !== 'https:'
+        || sourceUrl.username.length > 0
+        || sourceUrl.password.length > 0
+      ) {
+        throw new Error('unsafe URL');
+      }
+    } catch {
+      throw new Error(
+        `${filePath}: metadata.json field "sourceUrl" must be an HTTPS URL without embedded credentials`,
+      );
+    }
   }
   return meta as CatalogueMetadata;
 }
@@ -135,7 +173,7 @@ function compile(): Catalogue {
       let metadata: CatalogueMetadata;
       try {
         const raw = JSON.parse(readFileSync(metadataPath, 'utf-8'));
-        metadata = validateMetadata(raw, metadataPath);
+        metadata = validateMetadata(raw, metadataPath, source);
       } catch (e) {
         console.error(`✘ ${metadataPath}: ${(e as Error).message}`);
         errors++;
@@ -204,6 +242,9 @@ function compile(): Catalogue {
         tags: metadata.tags ?? [],
         author: metadata.author ?? 'unknown',
         source,
+        license: metadata.license,
+        sourceUrl: metadata.sourceUrl,
+        version: metadata.version,
         ontology,
         bindings,
       });

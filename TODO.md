@@ -172,6 +172,8 @@ into a static JSON file.
   healthcare, etc.)
 - [x] Add search/filter by name, author, tags
 - [x] Show author + contributor info for community ontologies
+- [x] Preserve and display license, upstream source, and version attribution;
+  require license and source metadata for external catalogue entries
 - [x] Add "View RDF source" button for each ontology (links to the raw file
   in the repo or displays inline)
 - [x] Add pagination or virtual scroll if the catalogue grows large
