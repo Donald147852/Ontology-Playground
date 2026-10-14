@@ -31,7 +31,9 @@ the live search bar to filter entities and relationships.
 A curated library of official and community-contributed ontologies spanning six
 domains (Retail, E-Commerce, Healthcare, Finance, Manufacturing, Education).
 Browse by category, search by name or tags, load any ontology with one click,
-and view its RDF source. Every ontology has a shareable deep link
+and view its RDF source. Catalogue cards preserve and display available
+license, upstream source, and version attribution for external standards and
+adapted community entries. Every ontology has a shareable deep link
 (`/#/catalogue/official/cosmic-coffee`).
 
 ### Visual Ontology Designer
@@ -44,10 +46,16 @@ and export to RDF/XML or JSON.
 
 ### RDF Import & Export
 
-Full round-trip support for RDF/XML (OWL classes, datatype properties, object
-properties with cardinalities). Import `.rdf` / `.owl` files, export in the
-exact format Microsoft Fabric IQ expects, and verify fidelity with automated
-round-trip tests.
+Import and export the Playground's supported RDF/XML subset: OWL classes,
+datatype properties, object properties with cardinalities, and internal
+`rdfs:subClassOf` hierarchies. The importer accepts typed elements and the
+equivalent `rdf:Description` / `rdf:type` syntax. Export in the format Microsoft
+Fabric IQ expects, with automated round-trip tests for Playground-generated
+RDF. Imported class hierarchies remain `rdfs:subClassOf` statements on export
+and are not misrepresented as Fabric relationship types. Large graphs
+automatically use a fast grid layout and bounded UI lists instead of running an
+expensive force layout over every element. Turtle input is not currently
+supported.
 
 ### One-Click Catalogue PR
 

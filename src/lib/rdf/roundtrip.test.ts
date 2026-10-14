@@ -49,6 +49,7 @@ function expectOntologiesEqual(actual: Ontology, expected: Ontology) {
     expect(ar.from).toBe(er.from);
     expect(ar.to).toBe(er.to);
     expect(ar.cardinality).toBe(er.cardinality);
+    expect(ar.kind ?? 'association').toBe(er.kind ?? 'association');
     if (er.description) {
       expect(ar.description).toBe(er.description);
     }
@@ -148,6 +149,33 @@ describe('RDF round-trip tests', () => {
       ],
     };
     const rdf = serializeToRDF(ontology);
+    const { ontology: parsed } = parseRDF(rdf);
+    expectOntologiesEqual(parsed, ontology);
+  });
+
+  it('round-trips subclass relationships without converting them to object properties', () => {
+    const ontology: Ontology = {
+      name: 'Hierarchy Test',
+      description: 'Tests class hierarchy fidelity',
+      entityTypes: [
+        { id: 'parent', name: 'Parent', description: '', icon: '📦', color: '#111', properties: [] },
+        { id: 'child', name: 'Child', description: '', icon: '📦', color: '#222', properties: [] },
+      ],
+      relationships: [
+        {
+          id: 'child-subClassOf-parent',
+          name: 'subClassOf',
+          from: 'child',
+          to: 'parent',
+          cardinality: 'many-to-one',
+          kind: 'subclass',
+        },
+      ],
+    };
+    const rdf = serializeToRDF(ontology);
+    expect(rdf).toContain('<rdfs:subClassOf rdf:resource="http://example.org/ontology/hierarchy-test/Parent"/>');
+    expect(rdf).not.toContain('<owl:ObjectProperty');
+
     const { ontology: parsed } = parseRDF(rdf);
     expectOntologiesEqual(parsed, ontology);
   });

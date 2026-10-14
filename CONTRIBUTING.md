@@ -81,6 +81,13 @@ The `metadata.json` file must conform to the schema at
 | `icon`        | No       | Emoji icon for display                                   |
 | `tags`        | No       | Array of tags for filtering                              |
 | `author`      | No       | Your GitHub username or name                             |
+| `license`     | No       | SPDX identifier or short license name                   |
+| `sourceUrl`   | No       | Canonical HTTPS URL for an adapted upstream ontology    |
+| `version`     | No       | Upstream ontology version represented by the entry      |
+
+If a community entry adapts an existing open ontology, include its license,
+canonical source URL, and version when known. Entries under
+`catalogue/external/` must provide both `license` and `sourceUrl`.
 
 ### Contributing Code
 

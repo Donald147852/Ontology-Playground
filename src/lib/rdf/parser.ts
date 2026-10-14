@@ -61,6 +61,29 @@ function getChildResource(
 }
 
 /**
+ * Get all rdf:resource attribute values from children with a given local name.
+ * Children without an rdf:resource attribute (e.g. nested owl:Restriction
+ * nodes) are ignored.
+ */
+function getChildResources(
+  parent: Element,
+  localName: string,
+  namespace?: string,
+): string[] {
+  const results: string[] = [];
+  for (let i = 0; i < parent.children.length; i++) {
+    const child = parent.children[i];
+    const childLocal = child.localName || child.tagName.split(':').pop();
+    if (childLocal !== localName || (namespace && child.namespaceURI !== namespace)) continue;
+    const resource =
+      child.getAttribute('rdf:resource') ||
+      child.getAttributeNS(RDF_NS, 'resource');
+    if (resource) results.push(resource);
+  }
+  return results;
+}
+
+/**
  * Get all text values from children with a given local name.
  */
 function getChildTexts(parent: Element, localName: string): string[] {
@@ -94,6 +117,18 @@ function uncapitalize(str: string): string {
   return str.charAt(0).toLowerCase() + str.slice(1);
 }
 
+function createUniqueId(baseId: string, usedIds: Set<string>): string {
+  const base = baseId || 'resource';
+  let candidate = base;
+  let suffix = 2;
+  while (usedIds.has(candidate)) {
+    candidate = `${base}-${suffix}`;
+    suffix += 1;
+  }
+  usedIds.add(candidate);
+  return candidate;
+}
+
 const VALID_PROPERTY_TYPES = ['string', 'integer', 'decimal', 'double', 'date', 'datetime', 'boolean', 'enum'] as const;
 type PropertyType = (typeof VALID_PROPERTY_TYPES)[number];
 
@@ -125,6 +160,52 @@ const RDF_NS = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#';
 const RDFS_NS = 'http://www.w3.org/2000/01/rdf-schema#';
 const OWL_NS = 'http://www.w3.org/2002/07/owl#';
 
+/**
+ * Collect all elements declaring a resource of the given type, supporting both
+ * RDF/XML syntaxes:
+ *
+ *  1. Typed node elements:       `<owl:Class rdf:about="...">`
+ *  2. rdf:Description elements:  `<rdf:Description rdf:about="...">`
+ *                                `  <rdf:type rdf:resource=".../owl#Class"/>`
+ *
+ * Many serializers (e.g. Python's rdflib, used by Brick and other published
+ * ontologies) emit only the second form, which we previously ignored (#85).
+ */
+function indexDescriptionTypes(root: Element): Map<string, Element[]> {
+  const index = new Map<string, Element[]>();
+  const descriptions = root.getElementsByTagNameNS(RDF_NS, 'Description');
+
+  for (let i = 0; i < descriptions.length; i++) {
+    const element = descriptions[i];
+    const indexedTypes = new Set<string>();
+    for (let j = 0; j < element.children.length; j++) {
+      const child = element.children[j];
+      if (child.namespaceURI !== RDF_NS || child.localName !== 'type') continue;
+      const resource =
+        child.getAttribute('rdf:resource') || child.getAttributeNS(RDF_NS, 'resource');
+      if (!resource || indexedTypes.has(resource)) continue;
+      indexedTypes.add(resource);
+      const elements = index.get(resource) ?? [];
+      elements.push(element);
+      index.set(resource, elements);
+    }
+  }
+
+  return index;
+}
+
+function getTypedElements(
+  root: Element,
+  namespace: string,
+  localName: string,
+  descriptionTypeIndex: Map<string, Element[]>,
+): Element[] {
+  const results: Element[] = Array.from(root.getElementsByTagNameNS(namespace, localName));
+  const typeUri = namespace + localName;
+  results.push(...(descriptionTypeIndex.get(typeUri) ?? []));
+  return results;
+}
+
 interface ParsedDatatypeProperty {
   about: string;
   label: string;
@@ -143,6 +224,15 @@ interface ParsedDatatypeProperty {
  * Parse an RDF/XML (OWL) string into an Ontology and optional DataBindings.
  */
 export function parseRDF(rdfXml: string): { ontology: Ontology; bindings: DataBinding[] } {
+  // Give Turtle input a clear, actionable error instead of an XML parse error.
+  const sniff = rdfXml.trimStart();
+  if (!sniff.startsWith('<') && /^(@prefix|@base|PREFIX\s|BASE\s)/m.test(sniff)) {
+    throw new RDFParseError(
+      'This file appears to be Turtle (.ttl), which is not supported yet. ' +
+      'Please convert it to RDF/XML first (for example with Apache Jena "riot" or an online RDF converter).'
+    );
+  }
+
   const parser = new DOMParser();
   const doc = parser.parseFromString(rdfXml, 'application/xml');
 
@@ -153,12 +243,13 @@ export function parseRDF(rdfXml: string): { ontology: Ontology; bindings: DataBi
   }
 
   const root = doc.documentElement;
+  const descriptionTypeIndex = indexDescriptionTypes(root);
 
   // --- Extract ontology metadata ---
   let ontologyName = '';
   let ontologyDescription = '';
 
-  const ontologyEls = root.getElementsByTagNameNS(OWL_NS, 'Ontology');
+  const ontologyEls = getTypedElements(root, OWL_NS, 'Ontology', descriptionTypeIndex);
   if (ontologyEls.length > 0) {
     const ontEl = ontologyEls[0];
     ontologyName = getChildText(ontEl, 'label', RDFS_NS) || '';
@@ -166,8 +257,9 @@ export function parseRDF(rdfXml: string): { ontology: Ontology; bindings: DataBi
   }
 
   // --- Extract OWL Classes → EntityTypes ---
-  const classEls = root.getElementsByTagNameNS(OWL_NS, 'Class');
+  const classEls = getTypedElements(root, OWL_NS, 'Class', descriptionTypeIndex);
   const entityMap = new Map<string, EntityType>();
+  const usedEntityIds = new Set<string>();
 
   for (let i = 0; i < classEls.length; i++) {
     const el = classEls[i];
@@ -175,7 +267,9 @@ export function parseRDF(rdfXml: string): { ontology: Ontology; bindings: DataBi
     if (!about) continue;
 
     const className = localNameFromUri(about);
-    const entityId = uncapitalize(className);
+    const existingEntity = entityMap.get(about);
+    const entityId = existingEntity?.id
+      ?? createUniqueId(uncapitalize(className) || 'entity', usedEntityIds);
     const label = getChildText(el, 'label', RDFS_NS) || className;
     const description = getChildText(el, 'comment', RDFS_NS) || '';
     const icon = getChildText(el, 'icon') || '📦';
@@ -192,7 +286,12 @@ export function parseRDF(rdfXml: string): { ontology: Ontology; bindings: DataBi
   }
 
   // --- Extract DatatypeProperties → Properties + Relationship Attributes ---
-  const dtPropEls = root.getElementsByTagNameNS(OWL_NS, 'DatatypeProperty');
+  const dtPropEls = getTypedElements(
+    root,
+    OWL_NS,
+    'DatatypeProperty',
+    descriptionTypeIndex,
+  );
   const parsedDtProps: ParsedDatatypeProperty[] = [];
 
   for (let i = 0; i < dtPropEls.length; i++) {
@@ -268,16 +367,23 @@ export function parseRDF(rdfXml: string): { ontology: Ontology; bindings: DataBi
   }
 
   // --- Extract ObjectProperties → Relationships ---
-  const objPropEls = root.getElementsByTagNameNS(OWL_NS, 'ObjectProperty');
+  const objPropEls = getTypedElements(
+    root,
+    OWL_NS,
+    'ObjectProperty',
+    descriptionTypeIndex,
+  );
   const relationships: Relationship[] = [];
+  const usedRelationshipIds = new Set<string>();
 
   for (let i = 0; i < objPropEls.length; i++) {
     const el = objPropEls[i];
     const about = el.getAttribute('rdf:about') || el.getAttributeNS(RDF_NS, 'about') || '';
     if (!about) continue;
 
-    const relId = localNameFromUri(about);
-    const label = getChildText(el, 'label', RDFS_NS) || relId;
+    const sourceRelId = localNameFromUri(about) || 'relationship';
+    const relId = createUniqueId(sourceRelId, usedRelationshipIds);
+    const label = getChildText(el, 'label', RDFS_NS) || sourceRelId;
     const description = getChildText(el, 'comment', RDFS_NS) || undefined;
 
     // Get from/to entity IDs — prefer explicit ont:fromEntityId/toEntityId,
@@ -287,11 +393,17 @@ export function parseRDF(rdfXml: string): { ontology: Ontology; bindings: DataBi
 
     if (!fromId) {
       const domainUri = getChildResource(el, 'domain');
-      if (domainUri) fromId = uncapitalize(localNameFromUri(domainUri));
+      if (domainUri) {
+        fromId = entityMap.get(domainUri)?.id
+          ?? uncapitalize(localNameFromUri(domainUri));
+      }
     }
     if (!toId) {
       const rangeUri = getChildResource(el, 'range');
-      if (rangeUri) toId = uncapitalize(localNameFromUri(rangeUri));
+      if (rangeUri) {
+        toId = entityMap.get(rangeUri)?.id
+          ?? uncapitalize(localNameFromUri(rangeUri));
+      }
     }
 
     const cardinalityStr = getChildText(el, 'cardinality') || 'one-to-many';
@@ -310,7 +422,7 @@ export function parseRDF(rdfXml: string): { ontology: Ontology; bindings: DataBi
     if (description) rel.description = description;
 
     // Attach relationship attributes
-    const attrs = relAttrMap.get(relId);
+    const attrs = relAttrMap.get(sourceRelId);
     if (attrs && attrs.length > 0) {
       rel.attributes = attrs;
     }
@@ -321,14 +433,52 @@ export function parseRDF(rdfXml: string): { ontology: Ontology; bindings: DataBi
     relationships.push(rel);
   }
 
+  // --- Extract rdfs:subClassOf hierarchy → Relationships (#101) ---
+  // Many published ontologies (e.g. Brick) carry little or no
+  // rdfs:domain/rdfs:range on their object properties; their dominant graph
+  // structure is the class taxonomy. Surface it as relationships so imported
+  // hierarchies are visible instead of rendering as disconnected nodes.
+  const seenSubClassEdges = new Set<string>();
+
+  for (let i = 0; i < classEls.length; i++) {
+    const el = classEls[i];
+    const about = el.getAttribute('rdf:about') || el.getAttributeNS(RDF_NS, 'about') || '';
+    if (!about) continue;
+
+    const subEntity = entityMap.get(about);
+    if (!subEntity) continue;
+
+    const superUris = getChildResources(el, 'subClassOf', RDFS_NS);
+    for (const superUri of superUris) {
+      // Only link classes that were imported as entities; skip external
+      // references (owl:Thing, other vocabularies) and self-references.
+      const superEntity = entityMap.get(superUri);
+      if (!superEntity || superEntity === subEntity) continue;
+
+      const edgeKey = `${subEntity.id}\u0000${superEntity.id}`;
+      if (seenSubClassEdges.has(edgeKey)) continue;
+      seenSubClassEdges.add(edgeKey);
+
+      relationships.push({
+        id: createUniqueId(
+          `${subEntity.id}-subClassOf-${superEntity.id}`,
+          usedRelationshipIds,
+        ),
+        name: 'subClassOf',
+        from: subEntity.id,
+        to: superEntity.id,
+        cardinality: 'many-to-one',
+        kind: 'subclass',
+      });
+    }
+  }
+
   // --- Extract DataBindings ---
   const bindings: DataBinding[] = [];
-  // Look for ont:DataBinding elements (they use the ontology namespace)
-  const allElements = root.getElementsByTagName('*');
-  for (let i = 0; i < allElements.length; i++) {
-    const el = allElements[i];
-    const localName = el.localName || el.tagName.split(':').pop();
-    if (localName !== 'DataBinding') continue;
+  // DataBinding uses the ontology's own namespace, so match by local name.
+  const dataBindingElements = root.getElementsByTagNameNS('*', 'DataBinding');
+  for (let i = 0; i < dataBindingElements.length; i++) {
+    const el = dataBindingElements[i];
 
     const entityId = getChildText(el, 'boundEntityId') || '';
     const source = getChildText(el, 'source') || '';
