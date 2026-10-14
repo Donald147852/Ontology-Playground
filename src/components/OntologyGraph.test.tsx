@@ -12,14 +12,17 @@ import { OntologyGraph } from './OntologyGraph';
 const graphMocks = vi.hoisted(() => {
   const collection: Record<string, unknown> & { length: number } = { length: 1 };
   const chain = vi.fn(() => collection);
+  const addClass = vi.fn(() => collection);
+  const removeClass = vi.fn(() => collection);
+  const connectedEdges = vi.fn(() => collection);
   Object.assign(collection, {
-    addClass: chain,
-    removeClass: chain,
+    addClass,
+    removeClass,
     unselect: chain,
     select: chain,
     style: chain,
     not: chain,
-    connectedEdges: chain,
+    connectedEdges,
     connectedNodes: chain,
     closedNeighborhood: chain,
     toggleClass: chain,
@@ -53,7 +56,7 @@ const graphMocks = vi.hoisted(() => {
     png: vi.fn(() => 'data:image/png;base64,test'),
   };
   const cytoscape = vi.fn(() => cy);
-  return { cy, cytoscape };
+  return { addClass, connectedEdges, cy, cytoscape };
 });
 
 vi.mock('cytoscape', () => {
@@ -84,6 +87,31 @@ function createLargeFixture(): Ontology {
   return {
     name: 'Large Taxonomy Fixture',
     description: 'Large rendering fixture',
+    entityTypes,
+    relationships,
+  };
+}
+
+function createDenseFixture(): Ontology {
+  const entityTypes = Array.from({ length: 90 }, (_, index) => ({
+    id: `dense-${index}`,
+    name: `Dense ${index}`,
+    description: `Dense node ${index}`,
+    properties: [],
+    icon: 'D',
+    color: '#0078D4',
+  }));
+  const relationships: Relationship[] = entityTypes.slice(1).map((entity) => ({
+    id: `dense-edge-${entity.id}`,
+    name: 'connectedTo',
+    from: entity.id,
+    to: entityTypes[0].id,
+    cardinality: 'many-to-one',
+  }));
+
+  return {
+    name: 'Dense Graph Fixture',
+    description: 'Dense rendering fixture',
     entityTypes,
     relationships,
   };
@@ -142,6 +170,13 @@ describe('OntologyGraph adaptive rendering', () => {
       selector: 'edge.hovered',
       style: expect.objectContaining({ label: 'data(label)' }),
     }));
+    expect(config.style).toContainEqual(expect.objectContaining({
+      selector: 'edge.selected-node-edge',
+      style: expect.objectContaining({
+        label: 'data(label)',
+        'min-zoomed-font-size': 0,
+      }),
+    }));
     expect(graphMocks.cy.on).toHaveBeenCalledWith(
       'mouseover',
       'edge',
@@ -172,6 +207,29 @@ describe('OntologyGraph adaptive rendering', () => {
     });
     expect(screen.getByRole('slider', { name: 'Detail: 2 hops' })).toHaveValue('2');
     expect(resetView).toBeEnabled();
+  });
+
+  it('keeps relationship labels occluded for selected dense graph hubs', async () => {
+    useAppStore.getState().loadOntology(createDenseFixture());
+    render(<OntologyGraph />);
+    await waitFor(() => {
+      expect(graphMocks.cytoscape).toHaveBeenCalledTimes(1);
+    });
+
+    const config = graphMocks.cytoscape.mock.calls[0][0] as CapturedConfig;
+    expect(config.style).toContainEqual(expect.objectContaining({
+      selector: 'edge',
+      style: expect.objectContaining({ label: '' }),
+    }));
+
+    act(() => {
+      useAppStore.getState().selectEntity('dense-0');
+    });
+
+    expect(graphMocks.connectedEdges).toHaveBeenCalled();
+    expect(graphMocks.addClass).not.toHaveBeenCalledWith(
+      'selected-node-edge',
+    );
   });
 
   it('keeps a visible boundary entity anchored until expansion is requested', async () => {
@@ -206,11 +264,15 @@ describe('OntologyGraph adaptive rendering', () => {
     );
     expect(expandButton).toHaveStyle({ left: '220px', top: '190px' });
     expect(graphMocks.cytoscape).toHaveBeenCalledTimes(1);
+    expect(graphMocks.connectedEdges).toHaveBeenCalled();
+    expect(graphMocks.addClass).toHaveBeenCalledWith('selected-node-edge');
 
+    graphMocks.addClass.mockClear();
     fireEvent.click(expandButton);
     await waitFor(() => {
       expect(graphMocks.cytoscape).toHaveBeenCalledTimes(2);
     });
+    expect(graphMocks.addClass).toHaveBeenCalledWith('selected-node-edge');
     expect(screen.queryByRole('button', {
       name: `Expand ${boundaryName} to show ${hiddenNeighborCount} hidden ${
         hiddenNeighborCount === 1 ? 'neighbor' : 'neighbors'

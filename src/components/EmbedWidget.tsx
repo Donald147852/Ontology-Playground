@@ -10,6 +10,7 @@
  *  - Loads ontology from catalogue, URL, or inline base64 JSON
  */
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -42,6 +43,10 @@ import {
   type GraphPositionSnapshot,
 } from '../lib/graphPositionPersistence';
 import type { Catalogue } from '../types/catalogue';
+import {
+  EMBED_THEMES,
+  type EmbedThemeTokens,
+} from './embedTheme';
 import { useGraphNodeActionPosition } from './useGraphNodeActionPosition';
 
 cytoscape.use(fcose);
@@ -54,30 +59,6 @@ export interface EmbedConfig {
   height: string;
   catalogueBaseUrl?: string;
 }
-
-// ─── Theme tokens ────────────────────────────────────────────────────────────
-
-interface ThemeTokens {
-  bg: string; bgSecondary: string; bgTertiary: string;
-  text: string; textSecondary: string; textTertiary: string;
-  border: string; accent: string;
-  nodeText: string; edgeColor: string; edgeText: string;
-}
-
-const THEMES: Record<string, ThemeTokens> = {
-  dark: {
-    bg: '#1B1B1B', bgSecondary: '#2D2D2D', bgTertiary: '#3D3D3D',
-    text: '#FFFFFF', textSecondary: '#B3B3B3', textTertiary: '#808080',
-    border: '#404040', accent: '#0078D4',
-    nodeText: '#B3B3B3', edgeColor: '#505050', edgeText: '#808080',
-  },
-  light: {
-    bg: '#FFFFFF', bgSecondary: '#F5F5F5', bgTertiary: '#EEEEEE',
-    text: '#1A1A1A', textSecondary: '#555555', textTertiary: '#888888',
-    border: '#DDDDDD', accent: '#0078D4',
-    nodeText: '#2A2A2A', edgeColor: '#888888', edgeText: '#555555',
-  },
-};
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
@@ -97,7 +78,7 @@ export function EmbedWidget({ config }: { config: EmbedConfig }) {
   const [selected, setSelected] = useState<SelectedItem | null>(null);
   const [copied, setCopied] = useState(false);
 
-  const theme = THEMES[config.theme] || THEMES.dark;
+  const theme = EMBED_THEMES[config.theme] || EMBED_THEMES.dark;
 
   // ─ Load ontology ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -229,7 +210,7 @@ interface EmbedHeaderProps {
   ontology: Ontology;
   tab: Tab;
   setTab: (t: Tab) => void;
-  theme: ThemeTokens;
+  theme: EmbedThemeTokens;
   copied: boolean;
   onCopyRdf: () => void;
 }
@@ -282,7 +263,7 @@ function EmbedHeader({ ontology, tab, setTab, theme, copied, onCopyRdf }: EmbedH
 
 interface EmbedGraphProps {
   ontology: Ontology;
-  theme: ThemeTokens;
+  theme: EmbedThemeTokens;
   selected: SelectedItem | null;
   setSelected: (s: SelectedItem | null) => void;
 }
@@ -296,6 +277,24 @@ function EmbedGraph({ ontology, theme, selected, setSelected }: EmbedGraphProps)
   useEffect(() => {
     selectedRef.current = selected;
   }, [selected]);
+  const applySelectionState = useCallback((
+    cy: Core,
+    revealConnectedLabels: boolean,
+  ) => {
+    const selectedItem = selectedRef.current;
+    cy.elements().unselect();
+    cy.edges().removeClass('selected-node-edge');
+
+    if (selectedItem?.entity) {
+      const node = cy.getElementById(selectedItem.entity.id);
+      node.select();
+      if (revealConnectedLabels) {
+        node.connectedEdges().addClass('selected-node-edge');
+      }
+    } else if (selectedItem?.relationship) {
+      cy.getElementById(selectedItem.relationship.id).select();
+    }
+  }, []);
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [depth, setDepth] = useState(DEFAULT_LARGE_GRAPH_DEPTH);
@@ -482,6 +481,10 @@ function EmbedGraph({ ontology, theme, selected, setSelected }: EmbedGraphProps)
             'font-size': '11px', 'font-family': 'Segoe UI, sans-serif',
             'min-zoomed-font-size': 9,
             color: theme.edgeText, 'text-rotation': 'autorotate', 'text-margin-y': -8,
+            'text-background-color': theme.edgeLabelBg,
+            'text-background-opacity': 1,
+            'text-background-padding': '2px',
+            'text-background-shape': 'roundrectangle',
             width: 2, 'line-color': theme.edgeColor, 'target-arrow-color': theme.edgeColor,
             'target-arrow-shape': 'triangle', 'curve-style': 'unbundled-bezier',
             'control-point-step-size': 40,
@@ -492,11 +495,18 @@ function EmbedGraph({ ontology, theme, selected, setSelected }: EmbedGraphProps)
           style: { 'line-style': 'dashed' },
         },
         {
+          selector: 'edge.selected-node-edge',
+          style: {
+            label: 'data(label)',
+            'min-zoomed-font-size': 0,
+          },
+        },
+        {
           selector: 'edge.hovered',
           style: {
             label: 'data(label)',
             width: 3,
-            color: theme.accent,
+            color: theme.text,
             'line-color': theme.accent,
             'target-arrow-color': theme.accent,
           },
@@ -507,7 +517,7 @@ function EmbedGraph({ ontology, theme, selected, setSelected }: EmbedGraphProps)
             width: 4,
             'line-color': theme.accent,
             'target-arrow-color': theme.accent,
-            color: theme.accent,
+            color: theme.text,
             label: 'data(label)',
           },
         },
@@ -569,14 +579,10 @@ function EmbedGraph({ ontology, theme, selected, setSelected }: EmbedGraphProps)
 
     cyRef.current = cy;
     setGraphInstance(cy);
-    const selectedItem = selectedRef.current;
-    if (selectedItem?.entity) {
-      cy.getElementById(selectedItem.entity.id).select();
-    } else if (selectedItem?.relationship) {
-      cy.getElementById(selectedItem.relationship.id).select();
-    }
+    applySelectionState(cy, graphView.mode === 'bounded');
     return () => { cy.destroy(); cyRef.current = null; };
   }, [
+    applySelectionState,
     elements,
     graphView.mode,
     layout,
@@ -584,6 +590,13 @@ function EmbedGraph({ ontology, theme, selected, setSelected }: EmbedGraphProps)
     setSelected,
     theme,
   ]);
+
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (cy) {
+      applySelectionState(cy, graphView.mode === 'bounded');
+    }
+  }, [applySelectionState, graphView.mode, selected]);
 
   const handleSearch = () => {
     pendingPositionSnapshotRef.current = null;
@@ -718,7 +731,7 @@ interface EmbedLargeGraphControlsProps {
     hiddenNeighborCount: number;
     isExpanded: boolean;
   } | null;
-  theme: ThemeTokens;
+  theme: EmbedThemeTokens;
   onSearchInputChange: (value: string) => void;
   onSearch: () => void;
   onDepthChange: (depth: number) => void;
@@ -939,7 +952,7 @@ function EmbedLargeGraphControls({
           )}
           <div style={{ marginTop: 8, color: theme.textTertiary, lineHeight: 1.35 }}>
             Select a dashed “+N” entity to show its neighbor action beside the
-            {' '}node. Hover over or select a relationship to show its name.
+            {' '}node. Selecting any entity also labels its visible relationships.
           </div>
         </>
       )}
@@ -949,9 +962,9 @@ function EmbedLargeGraphControls({
 
 // ─── RDF Source ──────────────────────────────────────────────────────────────
 
-function EmbedRdfSource({ ontology, theme }: { ontology: Ontology; theme: ThemeTokens }) {
+function EmbedRdfSource({ ontology, theme }: { ontology: Ontology; theme: EmbedThemeTokens }) {
   const rdf = useMemo(() => serializeToRDF(ontology, []), [ontology]);
-  const isDark = theme === THEMES.dark;
+  const isDark = theme === EMBED_THEMES.dark;
   const hlTheme = isDark ? RDF_HIGHLIGHT_DARK : RDF_HIGHLIGHT_LIGHT;
   const highlighted = useMemo(() => highlightRdf(rdf, hlTheme), [rdf, hlTheme]);
 
@@ -971,7 +984,7 @@ function EmbedRdfSource({ ontology, theme }: { ontology: Ontology; theme: ThemeT
 
 interface InspectorProps {
   selected: SelectedItem;
-  theme: ThemeTokens;
+  theme: EmbedThemeTokens;
   ontology: Ontology;
   onClose: () => void;
 }

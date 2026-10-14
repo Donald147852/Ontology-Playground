@@ -61,7 +61,8 @@ without drawing the entire ontology at once. Selecting an entity does not move
 the graph; selecting a `+N` entity exposes a neighbor action beside that node.
 Expansion keeps existing entities and the viewport anchored while placing
 newly revealed hierarchy branches to avoid crossings where possible. Repeated
-relationship labels stay out of the overview until the relationship is hovered
+relationship labels stay out of the overview until an entity is selected,
+which labels its visible connections, or an individual relationship is hovered
 or selected. Turtle input is not currently supported.
 
 ### One-Click Catalogue PR

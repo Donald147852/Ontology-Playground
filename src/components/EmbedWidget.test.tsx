@@ -62,6 +62,30 @@ function createLargeOntology(): Ontology {
   };
 }
 
+function createDenseOntology(): Ontology {
+  const entityTypes = Array.from({ length: 90 }, (_, index) => ({
+    id: `dense-${index}`,
+    name: `Dense ${index}`,
+    description: `Dense node ${index}`,
+    icon: 'D',
+    color: '#0078D4',
+    properties: [],
+  }));
+
+  return {
+    name: 'Dense Embedded Graph',
+    description: 'Dense embed fixture',
+    entityTypes,
+    relationships: entityTypes.slice(1).map((entity) => ({
+      id: `dense-edge-${entity.id}`,
+      name: 'connectedTo',
+      from: entity.id,
+      to: entityTypes[0].id,
+      cardinality: 'many-to-one',
+    })),
+  };
+}
+
 function mockFetch(data: unknown, ok = true) {
   vi.spyOn(globalThis, 'fetch').mockResolvedValue({
     ok,
@@ -75,10 +99,16 @@ type MockHandler = (...args: unknown[]) => void;
 
 const embedGraphMocks = vi.hoisted(() => {
   const handlers: Record<string, MockHandler[]> = {};
-  const nodes = {
-    length: 1,
+  const nodes: Record<string, unknown> & { length: number } = { length: 1 };
+  const addClass = vi.fn(() => nodes);
+  const connectedEdges = vi.fn(() => nodes);
+  Object.assign(nodes, {
     toggleClass: vi.fn(),
     select: vi.fn(),
+    unselect: vi.fn(),
+    addClass,
+    removeClass: vi.fn(() => nodes),
+    connectedEdges,
     renderedBoundingBox: vi.fn(() => ({
       x1: 200,
       y1: 200,
@@ -96,7 +126,7 @@ const embedGraphMocks = vi.hoisted(() => {
         position: () => ({ x: 100, y: 100 }),
       });
     }),
-  };
+  });
   const mockCy = {
     on: (event: string, selectorOrFn: string | MockHandler, maybeFn?: MockHandler) => {
       const fn = maybeFn || selectorOrFn as MockHandler;
@@ -106,6 +136,8 @@ const embedGraphMocks = vi.hoisted(() => {
     off: vi.fn(),
     destroy: vi.fn(),
     container: () => document.createElement('div'),
+    elements: () => nodes,
+    edges: () => nodes,
     nodes: () => nodes,
     getElementById: () => nodes,
     zoom: vi.fn(() => 1),
@@ -115,7 +147,7 @@ const embedGraphMocks = vi.hoisted(() => {
   };
   const cytoscape = vi.fn(() => mockCy);
   Object.assign(cytoscape, { use: vi.fn() });
-  return { cytoscape, handlers };
+  return { addClass, connectedEdges, cytoscape, handlers };
 });
 
 /* Cytoscape needs a DOM container with dimensions.
@@ -270,6 +302,63 @@ describe('EmbedWidget', () => {
         name: 'Select a +N entity to show neighbors',
       }),
     ).toBeDisabled();
+    const graphConfig = embedGraphMocks.cytoscape.mock.calls[0][0] as {
+      style: Array<{
+        selector: string;
+        style: Record<string, unknown>;
+      }>;
+    };
+    expect(graphConfig.style).toContainEqual(expect.objectContaining({
+      selector: 'edge.selected-node-edge',
+      style: expect.objectContaining({
+        label: 'data(label)',
+        'min-zoomed-font-size': 0,
+      }),
+    }));
+    expect(graphConfig.style).toContainEqual(expect.objectContaining({
+      selector: 'edge',
+      style: expect.objectContaining({
+        label: '',
+        color: '#B3B3B3',
+        'text-background-color': '#2D2D2D',
+        'text-background-opacity': 1,
+      }),
+    }));
+  });
+
+  it('keeps relationship labels occluded for selected dense embed hubs', async () => {
+    const ontology = createDenseOntology();
+    const config: EmbedConfig = {
+      ontologyInline: btoa(JSON.stringify(ontology)),
+      theme: 'dark',
+      height: '400px',
+    };
+
+    render(<EmbedWidget config={config} />);
+
+    await screen.findByText('Dense Embedded Graph');
+    const graphConfig = embedGraphMocks.cytoscape.mock.calls[0][0] as {
+      style: Array<{
+        selector: string;
+        style: Record<string, unknown>;
+      }>;
+    };
+    expect(graphConfig.style).toContainEqual(expect.objectContaining({
+      selector: 'edge',
+      style: expect.objectContaining({ label: '' }),
+    }));
+
+    const nodeTapHandlers = embedGraphMocks.handlers['tap:node'];
+    act(() => {
+      nodeTapHandlers.at(-1)?.({
+        target: { id: () => 'dense-0' },
+      });
+    });
+    await screen.findByText('Dense node 0');
+
+    expect(embedGraphMocks.addClass).not.toHaveBeenCalledWith(
+      'selected-node-edge',
+    );
   });
 
   it('shows neighbor expansion beside a selected +N entity', async () => {
@@ -311,11 +400,19 @@ describe('EmbedWidget', () => {
       top: '190px',
       minHeight: '44px',
     });
+    expect(embedGraphMocks.connectedEdges).toHaveBeenCalled();
+    expect(embedGraphMocks.addClass).toHaveBeenCalledWith(
+      'selected-node-edge',
+    );
 
+    embedGraphMocks.addClass.mockClear();
     await user.click(expandAction);
     await waitFor(() => {
       expect(embedGraphMocks.cytoscape).toHaveBeenCalledTimes(2);
     });
+    expect(embedGraphMocks.addClass).toHaveBeenCalledWith(
+      'selected-node-edge',
+    );
     expect(expandAction).not.toBeInTheDocument();
   });
 

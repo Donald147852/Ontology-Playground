@@ -158,12 +158,22 @@ export function OntologyGraph() {
     };
   }, [selectedEntityId, selectedRelationshipId]);
 
-  const applySelectionState = useCallback((cy: Core) => {
+  const applySelectionState = useCallback((
+    cy: Core,
+    revealConnectedLabels: boolean,
+  ) => {
     const { entityId, relationshipId } = selectedGraphItemRef.current;
+    cy.edges().removeClass('selected-node-edge');
 
     if (focusNodeIdRef.current !== null) {
       cy.elements().unselect();
-      if (entityId) cy.getElementById(entityId).select();
+      if (entityId) {
+        const node = cy.getElementById(entityId);
+        node.select();
+        if (revealConnectedLabels) {
+          node.connectedEdges().addClass('selected-node-edge');
+        }
+      }
       if (relationshipId) cy.getElementById(relationshipId).select();
       return;
     }
@@ -179,6 +189,9 @@ export function OntologyGraph() {
 
       cy.elements().addClass('dimmed');
       node.removeClass('dimmed');
+      if (revealConnectedLabels) {
+        connectedEdges.addClass('selected-node-edge');
+      }
       connectedEdges.removeClass('dimmed');
       connectedNodes.removeClass('dimmed');
     }
@@ -499,6 +512,13 @@ export function OntologyGraph() {
           }
         },
         {
+          selector: 'edge.selected-node-edge',
+          style: {
+            'label': 'data(label)',
+            'min-zoomed-font-size': 0,
+          }
+        },
+        {
           selector: 'edge.hovered',
           style: {
             'label': 'data(label)',
@@ -645,7 +665,7 @@ export function OntologyGraph() {
     setGraphInstance(cy);
     window.__ONTOLOGY_PREVIEW_CY__ = cy;
     mountedRef.current = true;
-    applySelectionState(cy);
+    applySelectionState(cy, isBoundedView);
 
     return () => {
       mountedRef.current = false;
@@ -709,10 +729,11 @@ export function OntologyGraph() {
   useEffect(() => {
     const cy = getCy();
     if (!cy) return;
-    applySelectionState(cy);
+    applySelectionState(cy, isBoundedView);
   }, [
     applySelectionState,
     getCy,
+    isBoundedView,
     selectedEntityId,
     selectedRelationshipId,
   ]);
