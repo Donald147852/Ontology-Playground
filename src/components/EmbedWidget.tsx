@@ -638,13 +638,10 @@ function EmbedGraph({ ontology, theme, selected, setSelected }: EmbedGraphProps)
     pendingPositionSnapshotRef.current = cyRef.current
       ? captureGraphPositionSnapshot(cyRef.current)
       : null;
-    const nextView = createGraphView(ontology, {
-      search,
-      depth: nextDepth,
-    });
 
     setExpandedNodeIds(new Set());
-    clearSelectionOutsideView(nextView);
+    selectedRef.current = null;
+    setSelected(null);
     setDepth(nextDepth);
   };
 

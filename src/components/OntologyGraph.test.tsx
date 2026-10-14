@@ -311,6 +311,13 @@ describe('OntologyGraph adaptive rendering', () => {
     await waitFor(() => {
       expect(graphMocks.cytoscape).toHaveBeenCalledTimes(5);
     });
+    expect(useAppStore.getState().selectedEntityId).toBeNull();
+    expect(useAppStore.getState().selectedRelationshipId).toBeNull();
+    expect(
+      screen.getByRole('button', {
+        name: 'Select a +N entity to show neighbors',
+      }),
+    ).toBeDisabled();
     fireEvent.change(screen.getByRole('slider', { name: 'Detail: 2 hops' }), {
       target: { value: '1' },
     });
@@ -321,11 +328,11 @@ describe('OntologyGraph adaptive rendering', () => {
     const collapsedConfig =
       graphMocks.cytoscape.mock.calls[5][0] as CapturedConfig;
     expect(collapsedConfig.elements).toHaveLength(initialConfig.elements.length);
-    expect(screen.getByRole('button', {
-      name: `Show ${hiddenNeighborCount} hidden ${
-        hiddenNeighborCount === 1 ? 'neighbor' : 'neighbors'
-      } for ${boundaryName}`,
-    })).toBeEnabled();
+    expect(
+      screen.getByRole('button', {
+        name: 'Select a +N entity to show neighbors',
+      }),
+    ).toBeDisabled();
   });
 
   it('preserves unrelated highlighted reveals when collapsing neighbors', async () => {
@@ -386,6 +393,46 @@ describe('OntologyGraph adaptive rendering', () => {
       expect.objectContaining({
         data: expect.objectContaining({ id: highlightedEntityId }),
       }),
+    );
+  });
+
+  it('reapplies retained highlights after a detail change clears focus', async () => {
+    const ontology = createLargeFixture();
+    const initialView = createGraphView(ontology);
+    const highlightedEntityId = initialView.entities[0].id;
+    const boundaryId = [...initialView.hiddenNeighborCounts.keys()][0];
+    expect(boundaryId).toBeDefined();
+
+    useAppStore.getState().loadOntology(ontology);
+    render(<OntologyGraph />);
+    await waitFor(() => {
+      expect(graphMocks.cytoscape).toHaveBeenCalledTimes(1);
+    });
+    act(() => {
+      useAppStore.getState().setHighlightedEntities([highlightedEntityId]);
+      useAppStore.getState().selectEntity(boundaryId);
+    });
+    await waitFor(() => {
+      expect(graphMocks.addClass).toHaveBeenCalledWith('highlighted');
+    });
+    graphMocks.addClass.mockClear();
+
+    fireEvent.change(screen.getByRole('slider', { name: 'Detail: 1 hop' }), {
+      target: { value: '2' },
+    });
+    await waitFor(() => {
+      expect(graphMocks.cytoscape).toHaveBeenCalledTimes(2);
+    });
+
+    expect(useAppStore.getState().selectedEntityId).toBeNull();
+    expect(useAppStore.getState().highlightedEntities).toEqual([
+      highlightedEntityId,
+    ]);
+    await waitFor(() => {
+      expect(graphMocks.addClass).toHaveBeenCalledWith('highlighted');
+    });
+    expect(graphMocks.addClass).not.toHaveBeenCalledWith(
+      'selected-node-edge',
     );
   });
 

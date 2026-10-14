@@ -458,6 +458,14 @@ describe('EmbedWidget', () => {
     await waitFor(() => {
       expect(embedGraphMocks.cytoscape).toHaveBeenCalledTimes(5);
     });
+    expect(
+      screen.queryByText(boundaryEntity!.description),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', {
+        name: 'Select a +N entity to show neighbors',
+      }),
+    ).toBeDisabled();
     fireEvent.change(screen.getByRole('slider', { name: 'Detail: 2 hops' }), {
       target: { value: '1' },
     });
@@ -469,11 +477,11 @@ describe('EmbedWidget', () => {
       elements: unknown[];
     };
     expect(collapsedConfig.elements).toHaveLength(initialConfig.elements.length);
-    expect(screen.getByRole('button', {
-      name: `Show ${hiddenNeighborCount} hidden ${
-        hiddenNeighborCount === 1 ? 'neighbor' : 'neighbors'
-      } for ${boundaryEntity?.name}`,
-    })).toBeEnabled();
+    expect(
+      screen.getByRole('button', {
+        name: 'Select a +N entity to show neighbors',
+      }),
+    ).toBeDisabled();
   });
 
   it('clears a deep embed selection when lowering hierarchy detail', async () => {

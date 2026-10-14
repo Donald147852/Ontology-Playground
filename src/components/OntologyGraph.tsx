@@ -178,7 +178,7 @@ export function OntologyGraph() {
       return;
     }
 
-    cy.elements().removeClass('highlighted dimmed');
+    cy.elements().removeClass('dimmed');
     cy.elements().unselect();
 
     if (entityId) {
@@ -764,7 +764,13 @@ export function OntologyGraph() {
     } catch {
       // Graph may have been destroyed
     }
-  }, [highlightedEntities, highlightedRelationships, themeColors, getCy]);
+  }, [
+    getCy,
+    graphView,
+    highlightedEntities,
+    highlightedRelationships,
+    themeColors,
+  ]);
 
   // Graph controls
   const changeZoom = (delta: number) => {
@@ -857,10 +863,9 @@ export function OntologyGraph() {
     }
   };
 
-  const clearItemsOutsideView = (
+  const clearHighlightsOutsideView = (
     nextView: ReturnType<typeof createGraphView>,
   ) => {
-    clearSelectionOutsideView(nextView);
     const nextEntityIds = new Set(
       nextView.entities.map(({ id }) => id),
     );
@@ -886,7 +891,15 @@ export function OntologyGraph() {
     });
 
     setExpandedNodeIds(new Set());
-    clearItemsOutsideView(nextView);
+    selectedGraphItemRef.current = {
+      entityId: null,
+      relationshipId: null,
+    };
+    focusNodeIdRef.current = null;
+    selectEntity(null);
+    selectRelationship(null);
+    setFocusNodeId(null);
+    clearHighlightsOutsideView(nextView);
     setLargeDepth(nextDepth);
   };
 
