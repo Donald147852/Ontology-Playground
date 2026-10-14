@@ -2,6 +2,8 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md)
 
+> **翻译说明：** 此简体中文译文仅为提高可用性而按**“现状”（as is）**提供。术语和内容已由 **AI 依据 Microsoft Learn 官方简体中文文档进行核验**，但这并不代表 Microsoft 的官方翻译或认证。如有差异，以[英文 README](README.md)为准。
+
 > 注意：本项目使用了 AI 辅助编程进行开发。
 
 **[在线试用 &#x2192; microsoft.github.io/Ontology-Playground](https://microsoft.github.io/Ontology-Playground/)**
@@ -28,11 +30,12 @@ RDF/XML，并分享交互式图表——所有功能均来自完全静态的网�
 
 ### 本体目录
 
-精心整理的官方与社区贡献本体库，涵盖六个领域
+由官方与社区贡献本体组成的精选目录，涵盖六个领域
 （零售、电子商务、医疗保健、金融、制造和教育）。
 可按类别浏览、按名称或标签搜索、一键加载任意本体，
-并查看其 RDF 源代码。每个本体都有可分享的深层链接
-（`/#/catalogue/official/cosmic-coffee`）。
+并查看其 RDF 源文件。目录卡片会保留并显示外部标准和经适配的
+社区条目所提供的许可证、上游来源及版本归属信息。每个本体都有
+可分享的深层链接（`/#/catalogue/official/cosmic-coffee`）。
 
 ### 可视化本体设计器
 
@@ -43,21 +46,26 @@ RDF/XML，并分享交互式图表——所有功能均来自完全静态的网�
 
 ### RDF 导入与导出
 
-完整支持 RDF/XML 的往返转换（OWL 类、数据类型属性、带基数的对象
-属性）。可导入 `.rdf` / `.owl` 文件，以 Microsoft Fabric IQ 所需的
-准确格式导出，并通过自动化往返测试验证保真度。
+支持导入和导出 Playground 所支持的 RDF/XML 子集：OWL 类、
+数据类型属性、带基数的对象属性，以及内部 `rdfs:subClassOf` 层次结构。
+导入器既接受类型化元素，也接受等效的 `rdf:Description` / `rdf:type`
+语法。系统会按照 Microsoft Fabric IQ 所需的格式导出，并通过自动往返
+测试验证 Playground 生成的 RDF。导入的类层次结构在导出时仍保留为
+`rdfs:subClassOf` 语句，不会被错误表示为 Fabric 关系类型。对于大型图，
+系统会自动使用快速网格布局和限制显示数量的 UI 列表，而不是对所有元素
+运行开销较大的力导向布局。目前不支持 Turtle 输入。
 
-### 一键创建目录 PR
+### 一键提交本体目录 PR
 
-使用 GitHub（设备流程）登录，即可直接从设计器向社区目录
-提交你的本体——应用会 fork 仓库、创建分支、提交 RDF 和元数据，
+使用 GitHub（设备流程）登录，即可直接从设计器向社区本体目录
+提交你的本体——应用会 fork 存储库、创建分支、提交 RDF 和元数据，
 并自动发起拉取请求。
 
 ### 可嵌入小组件
 
-一个独立的 JavaScript 文件（`ontology-embed.js`），只需一个
+一个自包含的 JavaScript 文件（`ontology-embed.js`），只需一个
 `<script>` 标签即可在任意网页上渲染交互式本体查看器。
-支持深色/浅色主题、多种加载方式（目录 ID、URL、内联 base64）
+支持深色/浅色主题、多种加载方式（目录 ID、URL、内联 Base64）
 和点击查看详情。详细信息请参阅
 [嵌入指南](docs/embed-guide.md)。
 
@@ -106,7 +114,7 @@ RDF/XML，并分享交互式图表——所有功能均来自完全静态的网�
 
 首次访问者会看到包含聚光灯叠层的 5 步引导，依次突出显示
 页眉、图、任务、检查器和设计器。可以关闭，并通过保存在
-`localStorage` 中的“不再显示”选项永久隐藏。
+`localStorage` 中的“不再显示”选项记住此设置。
 
 ### 深层链接与 URL 路由
 
@@ -115,7 +123,7 @@ RDF/XML，并分享交互式图表——所有功能均来自完全静态的网�
 | 路由 | 页面 |
 |-------|------|
 | `/#/` | 首页（默认本体） |
-| `/#/catalogue` | 本体库 |
+| `/#/catalogue` | 本体目录 |
 | `/#/catalogue/<source>/<slug>` | 指定本体（例如 `/#/catalogue/official/cosmic-coffee`） |
 | `/#/designer` | 可视化设计器 |
 | `/#/designer/<source>/<slug>` | 加载目录本体的设计器（例如 `/#/designer/official/cosmic-coffee`） |
@@ -136,7 +144,7 @@ RDF/XML，并分享交互式图表——所有功能均来自完全静态的网�
 
 ## 入门
 
-### 前置条件
+### 先决条件
 
 - Node.js 18+
 - npm 9+
@@ -162,7 +170,7 @@ npm run dev
 npm run build
 ```
 
-构建流水线会编译目录、编译学习内容 Markdown、执行类型检查、
+构建管道会编译目录、编译学习内容 Markdown、执行类型检查、
 打包应用并构建嵌入小组件。输出位于
 `build/`。
 
@@ -177,12 +185,12 @@ npm run test:watch  # watch mode
 
 ### Azure Static Web Apps（主要方式）
 
-仓库附带 GitHub Actions 工作流，每次推送到 `main` 时都会部署到
+存储库附带 GitHub Actions 工作流，每次推送到 `main` 时都会部署到
 Azure SWA。
 
-1. 在 Azure 门户中创建 Static Web App
-2. 连接你的 GitHub 仓库
-3. 复制部署令牌，并将其添加为 GitHub Secret
+1. 在 Azure 门户中创建静态 Web 应用
+2. 连接你的 GitHub 存储库
+3. 复制部署令牌，并将其添加为 GitHub 机密
    `AZURE_STATIC_WEB_APPS_API_TOKEN_GREEN_PLANT_0BB1D2910`
 4. 推送到 `main`——工作流
    `.github/workflows/azure-static-web-apps-green-plant-0bb1d2910.yml` 会处理
@@ -193,7 +201,7 @@ Azure SWA。
 
 另一个工作流会部署到 GitHub Pages，非常适合 fork：
 
-1. Fork 本仓库
+1. Fork 此存储库
 2. 前往 **Settings → Pages → Source**，选择 **GitHub Actions**
 3. 推送到 `main`——`.github/workflows/deploy-ghpages.yml` 工作流
    会构建并部署到 `https://<username>.github.io/<repo-name>/`
@@ -208,7 +216,7 @@ Azure SWA。
 | `VITE_ENABLE_AI_BUILDER` | `false` | 启用 Azure OpenAI 本体构建器 |
 | `VITE_ENABLE_LEGACY_FORMATS` | `false` | 启用 JSON/YAML/CSV 导入/导出格式 |
 | `VITE_BASE_PATH` | `/` | 应用的基础路径（GitHub Pages 会自动设置） |
-| `VITE_GITHUB_CLIENT_ID` | *（空）* | 用于一键创建目录 PR 的 GitHub OAuth App 客户端 ID（[设置指南](docs/github-oauth-setup.md)） |
+| `VITE_GITHUB_CLIENT_ID` | *（空）* | 用于一键提交本体目录 PR 的 GitHub OAuth App 客户端 ID（[设置指南](docs/github-oauth-setup.md)） |
 | `VITE_GITHUB_OAUTH_BASE` | *（空）* | GitHub Pages 部署使用的外部 OAuth 代理 URL（例如 Cloudflare Worker URL） |
 
 ## 项目结构
@@ -243,24 +251,24 @@ Ontology-Playground/
 | [Playground 功能演示指南](docs/playground-features-demo-guide.md) | 展示 Playground 主要功能，并将其与 Fabric IQ 和 Real-Time Intelligence 联系起来的分步演示脚本 |
 | [本体学校演示指南](docs/ontology-school-demo-guide.md) | 针对课程、嵌入、测验、演示模式和学习工作流的分步现场演示计划 |
 | [嵌入指南](docs/embed-guide.md) | 如何在任意网页中嵌入交互式本体小组件 |
-| [GitHub OAuth 设置](docs/github-oauth-setup.md) | 如何为一键创建目录 PR 配置 GitHub OAuth |
+| [GitHub OAuth 设置](docs/github-oauth-setup.md) | 如何为一键提交本体目录 PR 配置 GitHub OAuth |
 | [嵌入安全](docs/embed-security.md) | 可嵌入小组件的安全模型 |
 | [学习内容指南](docs/learn-content-guide.md) | 如何为本体学校编写课程、文章、测验和本体嵌入 |
 | [本体学校审核工作流](docs/ontology-school-review-workflow.md) | 学校课程内容的人工审核与批准流程 |
 | [主题编写指南](docs/theme-authoring-guide.md) | 如何将新配色主题接入 Playground——令牌契约、appStore 和 CSS 步骤及对比度注意事项 |
 
-## AI 智能体快速入门
+## AI 代理快速入门
 
-本仓库包含 Copilot 自定义文件，使智能体能够可靠地：
+本存储库包含 Copilot 自定义文件，使代理能够可靠地：
 
-- 将客户 RDF/OWL 导入为目录就绪格式
+- 将客户 RDF/OWL 导入为可直接加入本体目录的格式
 - 生成渐进式本体学校模块
 - 让课程内容通过人工审核工作流
 
 包含的资源：
 
 - 技能：
-   - `.github/skills/ontology-catalog-import/`——将外部/客户 RDF/OWL 导入目录格式
+   - `.github/skills/ontology-catalog-import/`——将外部/客户 RDF/OWL 导入本体目录格式
    - `.github/skills/ontology-school-path-generator/`——生成渐进式本体学校模块
    - `.github/skills/community-ontology-contribution/`——按照正确的目录结构、元数据和验证要求，在 `catalogue/community/` 下添加贡献者本体
    - `.github/skills/name-generator/`——从已批准的 CSV 固件中为示例、演示、任务、测试和样例数据生成人名
@@ -289,8 +297,8 @@ npm run build
 
 ## 了解更多
 
-- [Microsoft Fabric IQ 本体文档](https://learn.microsoft.com/en-us/fabric/iq/ontology/overview)
-- [Azure Static Web Apps](https://docs.microsoft.com/azure/static-web-apps/)
+- [Microsoft Fabric IQ 本体（预览版）文档](https://learn.microsoft.com/zh-cn/fabric/iq/ontology/overview)
+- [Azure Static Web Apps](https://learn.microsoft.com/zh-cn/azure/static-web-apps/)
 
 ## 许可证
 

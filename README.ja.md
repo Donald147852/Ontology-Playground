@@ -2,6 +2,8 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md)
 
+> **翻訳に関する注意:** この日本語訳は、利便性向上のため**現状有姿 (as is)**で提供されています。用語と内容は Microsoft Learn の公式日本語ドキュメントに照らして **AI により検証**されていますが、Microsoft による公式な翻訳または認定ではありません。内容に差異がある場合は、[英語版 README](README.md) を正本とします。
+
 > 注：このプロジェクトは AI 支援コーディングを利用して開発されました。
 
 **[ライブ版を試す &#x2192; microsoft.github.io/Ontology-Playground](https://microsoft.github.io/Ontology-Playground/)**
@@ -11,8 +13,8 @@
 オントロジーと **Microsoft Fabric IQ** について学ぶための、無料で
 オープンソースの Web アプリケーションです。既製のオントロジーを調べ、
 ビジュアルエディターで独自のものを設計し、RDF/XML としてエクスポートして、
-インタラクティブな図を共有できます。バックエンド依存のない完全な
-静的サイトだけで、すべての機能を利用できます。
+インタラクティブな図を共有できます。バックエンドに依存しない完全な
+静的サイトで、すべての機能を利用できます。
 
 ![Microsoft Fabric](https://img.shields.io/badge/Microsoft-Fabric-0078D4?style=flat-square&logo=microsoft)
 ![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react)
@@ -28,11 +30,13 @@ Cytoscape.js を利用したグラフが、あらゆるオントロジーをイ�
 
 ### オントロジーカタログ
 
-公式およびコミュニティ提供のオントロジーを厳選したライブラリで、六つの
+公式およびコミュニティ提供のオントロジーを厳選したライブラリで、6 つの
 ドメイン（小売、E コマース、医療、金融、製造、教育）を扱います。
 カテゴリー別の閲覧、名前やタグによる検索、ワンクリックでの読み込み、
-RDF ソースの確認ができます。各オントロジーには共有可能なディープリンク
-（`/#/catalogue/official/cosmic-coffee`）があります。
+RDF ソースの確認ができます。カタログカードには、外部標準や Playground 向けに
+調整されたコミュニティ項目について、利用可能なライセンス、アップストリーム
+ソース、バージョンの帰属情報が保持・表示されます。各オントロジーには共有可能な
+ディープリンク（`/#/catalogue/official/cosmic-coffee`）があります。
 
 ### ビジュアルオントロジーデザイナー
 
@@ -44,15 +48,20 @@ RDF ソースの確認ができます。各オントロジーには共有可能�
 
 ### RDF のインポートとエクスポート
 
-RDF/XML（OWL クラス、データ型プロパティ、カーディナリティ付きオブジェクト
-プロパティ）の完全な往復変換に対応します。`.rdf` / `.owl` ファイルをインポートし、
-Microsoft Fabric IQ が期待する正確な形式でエクスポートし、自動化された
-往復テストで忠実性を検証できます。
+Playground が対応する RDF/XML サブセット（OWL クラス、データ型プロパティ、
+カーディナリティを持つオブジェクトプロパティ、内部の `rdfs:subClassOf` 階層）を
+インポートおよびエクスポートできます。インポーターは型付き要素と、同等の
+`rdf:Description` / `rdf:type` 構文を受け入れます。Microsoft Fabric IQ が期待する
+形式でエクスポートし、Playground が生成した RDF は自動往復テストで検証されます。
+インポートしたクラス階層は、エクスポート時も `rdfs:subClassOf` 文として保持され、
+Fabric のリレーションシップ型として誤って表現されません。大規模グラフでは、全要素に
+高コストなフォースレイアウトを適用せず、高速なグリッドレイアウトと表示件数を制限した
+UI リストを自動的に使用します。現在、Turtle 入力には対応していません。
 
 ### ワンクリックのカタログ PR
 
 GitHub（デバイスフロー）でサインインし、デザイナーからコミュニティ
-カタログへオントロジーを直接送信できます。アプリがリポジトリを fork し、
+カタログへオントロジーを直接送信できます。アプリがリポジトリをフォークし、
 ブランチを作成し、RDF とメタデータをコミットして、プルリクエストを自動で開きます。
 
 ### 埋め込み可能なウィジェット
@@ -60,7 +69,7 @@ GitHub（デバイスフロー）でサインインし、デザイナーから�
 自己完結型 JavaScript ファイル（`ontology-embed.js`）で、単一の
 `<script>` タグだけで任意の Web ページにインタラクティブな
 オントロジービューアーを表示します。ダーク/ライトテーマ、複数の読み込み方法
-（カタログ ID、URL、インライン base64）、クリックによる詳細確認に対応します。
+（カタログ ID、URL、インライン Base64）、クリックによる詳細確認に対応します。
 詳しくは[埋め込みガイド](docs/embed-guide.md)をご覧ください。
 
 ### オントロジースクール
@@ -85,7 +94,7 @@ GitHub（デバイスフロー）でサインインし、デザイナーから�
 
 ### クエストシステム
 
-複数ステップの説明、ヒント、進捗バー、実績バッジを備えた五つの段階的クエストが、オントロジーの概念を案内します。
+複数ステップの説明、ヒント、進捗バー、実績バッジを備えた 5 つの段階的クエストが、オントロジーの概念を案内します。
 
 ### 自然言語クエリプレイグラウンド
 
@@ -184,20 +193,20 @@ npm run test:watch  # watch mode
 リポジトリには、`main` へのプッシュごとに Azure SWA へデプロイする
 GitHub Actions ワークフローが含まれています。
 
-1. Azure Portal で Static Web App を作成します
+1. Azure portal で静的 Web アプリを作成します
 2. GitHub リポジトリを接続します
-3. デプロイトークンをコピーし、GitHub Secret として追加します
+3. デプロイ トークンをコピーし、GitHub シークレットとして追加します
    `AZURE_STATIC_WEB_APPS_API_TOKEN_GREEN_PLANT_0BB1D2910`
 4. `main` にプッシュします。
    `.github/workflows/azure-static-web-apps-green-plant-0bb1d2910.yml` のワークフローが
    残りを処理します
 5. プルリクエストには PR プレビュー環境が自動的に作成されます
 
-### GitHub Pages（fork 向け）
+### GitHub Pages（フォーク向け）
 
-別のワークフローが GitHub Pages へデプロイするため、fork に最適です。
+別のワークフローが GitHub Pages へデプロイするため、フォークに最適です。
 
-1. このリポジトリを fork します
+1. このリポジトリをフォークします
 2. **Settings → Pages → Source** を開き、**GitHub Actions** を選択します
 3. `main` にプッシュします。`.github/workflows/deploy-ghpages.yml` のワークフローが
    ビルドし、`https://<username>.github.io/<repo-name>/` へデプロイします
@@ -292,8 +301,8 @@ npm run build
 
 ## 詳細情報
 
-- [Microsoft Fabric IQ オントロジーのドキュメント](https://learn.microsoft.com/en-us/fabric/iq/ontology/overview)
-- [Azure Static Web Apps](https://docs.microsoft.com/azure/static-web-apps/)
+- [Microsoft Fabric IQ オントロジ (プレビュー) のドキュメント](https://learn.microsoft.com/ja-jp/fabric/iq/ontology/overview)
+- [Azure Static Web Apps](https://learn.microsoft.com/ja-jp/azure/static-web-apps/)
 
 ## ライセンス
 
