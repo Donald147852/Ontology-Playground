@@ -242,6 +242,13 @@ Every catalogue ontology needs a `metadata.json` alongside the `.rdf` file:
 | `icon` | No | Emoji for the gallery card. Defaults to a generic icon |
 | `tags` | No | Array of strings for filtering. Keep them lowercase |
 | `author` | No | Your GitHub username. Shown in the gallery |
+| `license` | External: yes | SPDX identifier or short license name shown in the gallery |
+| `sourceUrl` | External: yes | HTTPS URL for the canonical upstream source |
+| `version` | No | Upstream ontology version represented by this entry |
+
+Community entries adapted from another open project should also provide
+`license`, `sourceUrl`, and `version` when known. Original community entries
+may omit them. The compiler rejects non-HTTPS source links.
 
 ---
 
