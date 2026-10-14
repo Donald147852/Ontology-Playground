@@ -17,6 +17,7 @@ import { serializeToRDF } from '../src/lib/rdf/serializer';
 import { parseRDF } from '../src/lib/rdf/parser';
 import {
   CatalogueDiscoveryError,
+  compileCatalogue,
   discoverOntologyDirs,
   runCatalogueCompiler,
 } from './compile-catalogue';
@@ -79,15 +80,86 @@ function createDirectory(root: string, relativePath: string): string {
 }
 
 function createDirectorySymlink(root: string, relativePath: string): string {
+  const targetRoot = mkdtempSync(
+    join(tmpdir(), 'ontology-catalogue-symlink-target-'),
+  );
+  temporaryDirectories.push(targetRoot);
   const target = createDirectory(
-    root,
-    `symlink-targets/${relativePath.replaceAll('/', '-')}`,
+    targetRoot,
+    relativePath.replaceAll('/', '-'),
   );
   const path = join(root, relativePath);
   mkdirSync(dirname(path), { recursive: true });
   symlinkSync(target, path, process.platform === 'win32' ? 'junction' : 'dir');
   return path;
 }
+
+function createFileSymlink(root: string, relativePath: string): string {
+  const targetRoot = mkdtempSync(
+    join(tmpdir(), 'ontology-catalogue-file-target-'),
+  );
+  temporaryDirectories.push(targetRoot);
+  const target = join(targetRoot, relativePath.replaceAll('/', '-'));
+  writeFileSync(target, 'symlink target\n');
+  const path = join(root, relativePath);
+  mkdirSync(dirname(path), { recursive: true });
+  symlinkSync(target, path, 'file');
+  return path;
+}
+
+function supportsFileSymlinks(): boolean {
+  const root = mkdtempSync(join(tmpdir(), 'ontology-symlink-capability-'));
+  const target = join(root, 'target');
+  const link = join(root, 'link');
+
+  try {
+    writeFileSync(target, 'target\n');
+    symlinkSync(target, link, 'file');
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'EPERM' || code === 'EACCES' || code === 'ENOSYS') {
+      return false;
+    }
+    throw error;
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+const FILE_SYMLINKS_SUPPORTED = supportsFileSymlinks();
+
+function createCatalogueRootSymlink(): string {
+  const parent = mkdtempSync(join(tmpdir(), 'ontology-catalogue-root-test-'));
+  temporaryDirectories.push(parent);
+  const target = createDirectory(parent, 'target');
+  for (const tier of ['official', 'community', 'external']) {
+    mkdirSync(join(target, tier));
+  }
+  const path = join(parent, 'catalogue');
+  symlinkSync(target, path, process.platform === 'win32' ? 'junction' : 'dir');
+  return path;
+}
+
+const DISCOVERY_PARENT_PATHS = [
+  'official',
+  'community',
+  'community/alice',
+  'external',
+  'external/schema-org',
+];
+
+const UNSAFE_DIRECTORY_NAMES = [
+  'Uppercase',
+  'with space',
+  '..-traversal-like',
+  'contains.dot',
+  'percent%encoded',
+];
+
+const UNSAFE_DIRECTORY_CASES = DISCOVERY_PARENT_PATHS.flatMap(
+  (parent) => UNSAFE_DIRECTORY_NAMES.map((name) => [parent, name] as const),
+);
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
@@ -182,13 +254,42 @@ describe('catalogue directory discovery', () => {
 
 describe('catalogue discovery failures', () => {
   it.each([
-    'official/Unsafe-ontology',
-    'community/Unsafe-user',
-    'community/alice/Unsafe-ontology',
-    'external/Unsafe-source',
-    'external/schema-org/Unsafe-ontology',
-  ])('fails for an unsafe directory at %s and preserves existing output', (relativePath) => {
+    'OfficialCopy',
+    'commmunity',
+    'staging',
+    'with space',
+  ])('fails for the unexpected catalogue root directory %s', (name) => {
     const root = createTemporaryCatalogue();
+    const invalidPath = createDirectory(root, name);
+    const outputPath = join(root, 'catalogue.json');
+    writeFileSync(outputPath, 'previous valid catalogue\n');
+
+    expect(() => runCatalogueCompiler(root, outputPath)).toThrow(
+      CatalogueDiscoveryError,
+    );
+    expect(() => runCatalogueCompiler(root, outputPath)).toThrow(
+      `${invalidPath}: unexpected catalogue root directory`,
+    );
+    expect(readFileSync(outputPath, 'utf-8')).toBe('previous valid catalogue\n');
+  });
+
+  it('fails for a symlink directly under the catalogue root', () => {
+    const root = createTemporaryCatalogue();
+    const symlinkPath = createDirectorySymlink(root, 'unexpected-tier');
+    const outputPath = join(root, 'catalogue.json');
+    writeFileSync(outputPath, 'previous valid catalogue\n');
+
+    expect(() => runCatalogueCompiler(root, outputPath)).toThrow(
+      `${symlinkPath}: symlinks are not allowed in the catalogue`,
+    );
+    expect(readFileSync(outputPath, 'utf-8')).toBe('previous valid catalogue\n');
+  });
+
+  it.each(UNSAFE_DIRECTORY_CASES)(
+    'fails for the unsafe directory %s/%s and preserves existing output',
+    (parent, name) => {
+    const root = createTemporaryCatalogue();
+    const relativePath = `${parent}/${name}`;
     const invalidPath = createDirectory(root, relativePath);
     const outputPath = join(root, 'catalogue.json');
     writeFileSync(outputPath, 'previous valid catalogue\n');
@@ -200,7 +301,8 @@ describe('catalogue discovery failures', () => {
       `${invalidPath}: directory name contains unsafe characters`,
     );
     expect(readFileSync(outputPath, 'utf-8')).toBe('previous valid catalogue\n');
-  });
+    },
+  );
 
   it.each([
     'official/symlink',
@@ -219,6 +321,168 @@ describe('catalogue discovery failures', () => {
     );
     expect(() => runCatalogueCompiler(root, outputPath)).toThrow(
       `${symlinkPath}: symlinks are not allowed in the catalogue`,
+    );
+    expect(readFileSync(outputPath, 'utf-8')).toBe('previous valid catalogue\n');
+  });
+
+  it.each([
+    'official',
+    'community',
+    'external',
+  ])('fails when the %s tier is a symlink and preserves existing output', (tier) => {
+    const root = createTemporaryCatalogue();
+    const tierPath = join(root, tier);
+    rmSync(tierPath, { recursive: true });
+    createDirectorySymlink(root, tier);
+    const outputPath = join(root, 'catalogue.json');
+    writeFileSync(outputPath, 'previous valid catalogue\n');
+
+    expect(() => runCatalogueCompiler(root, outputPath)).toThrow(
+      CatalogueDiscoveryError,
+    );
+    expect(() => runCatalogueCompiler(root, outputPath)).toThrow(
+      `${tierPath}: symlinks are not allowed in the catalogue`,
+    );
+    expect(readFileSync(outputPath, 'utf-8')).toBe('previous valid catalogue\n');
+  });
+
+  it('fails when the catalogue root is a symlink and preserves existing output', () => {
+    const root = createCatalogueRootSymlink();
+    const outputPath = join(dirname(root), 'catalogue.json');
+    writeFileSync(outputPath, 'previous valid catalogue\n');
+
+    expect(() => runCatalogueCompiler(root, outputPath)).toThrow(
+      CatalogueDiscoveryError,
+    );
+    expect(() => runCatalogueCompiler(root, outputPath)).toThrow(
+      `${root}: symlinks are not allowed in the catalogue`,
+    );
+    expect(readFileSync(outputPath, 'utf-8')).toBe('previous valid catalogue\n');
+  });
+
+  it('ignores incidental regular files at grouping levels', () => {
+    const root = createTemporaryCatalogue();
+    const files = [
+      'official/README.md',
+      'community/README.md',
+      'community/alice/README.md',
+      'external/README.md',
+      'external/schema-org/README.md',
+    ];
+
+    for (const relativePath of files) {
+      const path = join(root, relativePath);
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, '');
+    }
+
+    expect(compileCatalogue(root)).toMatchObject({
+      count: 0,
+      entries: [],
+    });
+  });
+
+  it('treats an empty entry directory as invalid and preserves existing output', () => {
+    const root = createTemporaryCatalogue();
+    const emptyEntry = createDirectory(root, 'official/empty-entry');
+    const outputPath = join(root, 'catalogue.json');
+    writeFileSync(outputPath, 'previous valid catalogue\n');
+
+    expect(() => runCatalogueCompiler(root, outputPath)).toThrow(
+      'Catalogue compilation failed with 1 error(s)',
+    );
+    expect(readFileSync(outputPath, 'utf-8')).toBe('previous valid catalogue\n');
+    expect(readdirSync(emptyEntry)).toEqual([]);
+  });
+
+  describe.skipIf(!FILE_SYMLINKS_SUPPORTED)(
+    'ontology entry file symlinks',
+    () => {
+      it.each([
+        'metadata.json',
+        'ontology.rdf',
+        'README.md',
+      ])('fails for a symlinked %s inside an ontology entry', (file) => {
+        const root = createTemporaryCatalogue();
+        const symlinkPath = createFileSymlink(
+          root,
+          `official/symlinked-file/${file}`,
+        );
+        const outputPath = join(root, 'catalogue.json');
+        writeFileSync(outputPath, 'previous valid catalogue\n');
+
+        expect(() => runCatalogueCompiler(root, outputPath)).toThrow(
+          `${symlinkPath}: symlinks are not allowed in the catalogue`,
+        );
+        expect(readFileSync(outputPath, 'utf-8')).toBe(
+          'previous valid catalogue\n',
+        );
+      });
+    },
+  );
+
+  it('fails for a nested directory inside an ontology entry', () => {
+    const root = createTemporaryCatalogue();
+    const nestedPath = createDirectory(
+      root,
+      'official/nested-entry/unexpected',
+    );
+    const outputPath = join(root, 'catalogue.json');
+    writeFileSync(outputPath, 'previous valid catalogue\n');
+
+    expect(() => runCatalogueCompiler(root, outputPath)).toThrow(
+      `${nestedPath}: nested directories are not allowed inside an ontology entry`,
+    );
+    expect(readFileSync(outputPath, 'utf-8')).toBe('previous valid catalogue\n');
+  });
+
+  it('fails if an ontology directory changes after discovery', () => {
+    const root = createTemporaryCatalogue();
+    const entry = createDirectory(root, 'official/replaced-entry');
+    const metadataPath = join(entry, 'metadata.json');
+    writeFileSync(metadataPath, '{}');
+    writeFileSync(join(entry, 'ontology.rdf'), '<rdf:RDF />');
+    const replacementRoot = mkdtempSync(
+      join(tmpdir(), 'ontology-entry-replacement-'),
+    );
+    temporaryDirectories.push(replacementRoot);
+    const replacement = createDirectory(replacementRoot, 'entry');
+    writeFileSync(join(replacement, 'metadata.json'), '{}');
+    writeFileSync(join(replacement, 'ontology.rdf'), '<rdf:RDF />');
+    const outputPath = join(root, 'catalogue.json');
+    writeFileSync(outputPath, 'previous valid catalogue\n');
+
+    expect(() => runCatalogueCompiler(root, outputPath, {
+      beforeFileOpen: (path) => {
+        if (path !== metadataPath) return;
+        rmSync(entry, { recursive: true });
+        symlinkSync(
+          replacement,
+          entry,
+          process.platform === 'win32' ? 'junction' : 'dir',
+        );
+      },
+    })).toThrow(`${entry}: symlinks are not allowed in the catalogue`);
+    expect(readFileSync(outputPath, 'utf-8')).toBe('previous valid catalogue\n');
+  });
+
+  it('fails if a required file changes after discovery', () => {
+    const root = createTemporaryCatalogue();
+    const entry = createDirectory(root, 'official/replaced-file');
+    const metadataPath = join(entry, 'metadata.json');
+    writeFileSync(metadataPath, '{}');
+    writeFileSync(join(entry, 'ontology.rdf'), '<rdf:RDF />');
+    const outputPath = join(root, 'catalogue.json');
+    writeFileSync(outputPath, 'previous valid catalogue\n');
+
+    expect(() => runCatalogueCompiler(root, outputPath, {
+      beforeFileOpen: (path) => {
+        if (path !== metadataPath) return;
+        rmSync(metadataPath);
+        writeFileSync(metadataPath, '{"replacement":true}');
+      },
+    })).toThrow(
+      `${entry}: filesystem entry changed during catalogue compilation`,
     );
     expect(readFileSync(outputPath, 'utf-8')).toBe('previous valid catalogue\n');
   });
