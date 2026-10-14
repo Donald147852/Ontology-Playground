@@ -586,22 +586,25 @@ function EmbedLargeGraphControls({
 }: EmbedLargeGraphControlsProps) {
   const [collapsed, setCollapsed] = useState(false);
   const buttonStyle: React.CSSProperties = {
-    padding: '5px 8px',
+    minWidth: 44,
+    minHeight: 44,
+    padding: '8px 10px',
     background: theme.bgTertiary,
     color: theme.text,
     border: `1px solid ${theme.border}`,
     borderRadius: 4,
     cursor: 'pointer',
-    fontSize: 11,
+    fontSize: 14,
   };
   const inputStyle: React.CSSProperties = {
     minWidth: 0,
-    padding: '6px 8px',
+    minHeight: 44,
+    padding: '8px 10px',
     background: theme.bg,
     color: theme.text,
     border: `1px solid ${theme.border}`,
     borderRadius: 4,
-    fontSize: 11,
+    fontSize: 16,
   };
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
@@ -617,21 +620,30 @@ function EmbedLargeGraphControls({
         top: 8,
         left: 8,
         width: collapsed ? 'auto' : 'min(330px, calc(100% - 16px))',
+        maxHeight: collapsed ? undefined : 'calc(100% - 16px)',
         boxSizing: 'border-box',
         padding: collapsed ? '8px 10px' : 12,
+        overflowY: collapsed ? undefined : 'auto',
+        overscrollBehavior: 'contain',
+        WebkitOverflowScrolling: 'touch',
         background: theme.bgSecondary,
         color: theme.text,
         border: `1px solid ${theme.border}`,
         borderRadius: 8,
         boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
-        fontSize: 11,
+        fontSize: 12,
       }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
         <div>
-          <strong style={{ fontSize: 12 }}>Semantic overview</strong>
+          <strong style={{ fontSize: 14 }}>Semantic overview</strong>
           {!collapsed && (
-            <div style={{ marginTop: 2, color: theme.textTertiary }}>
+            <div style={{
+              marginTop: 2,
+              minHeight: 30,
+              color: theme.textTertiary,
+              lineHeight: 1.35,
+            }}>
               {graphView.visibleNodeCount} of {totalNodes} entities ·{' '}
               {graphView.visibleEdgeCount} of {totalEdges} relationships
             </div>
@@ -654,18 +666,40 @@ function EmbedLargeGraphControls({
               aria-label="Jump to an entity"
               value={searchInput}
               onChange={(event) => onSearchInputChange(event.target.value)}
-              placeholder="Name, ID, or description"
+              placeholder="Name, ID, or keyword"
               style={{ ...inputStyle, flex: 1 }}
             />
             <button type="submit" style={buttonStyle}>Find</button>
           </form>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
-            <label htmlFor="embed-graph-depth" style={{ color: theme.textSecondary }}>
-              Detail: <strong>{depth} {depth === 1 ? 'hop' : 'hops'}</strong>
-              <span style={{ color: theme.textTertiary }}>
-                {' '}· max {maxDepth}
-              </span>
-            </label>
+          <div style={{ marginTop: 8 }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+              minHeight: 44,
+            }}>
+              <label
+                htmlFor="embed-graph-depth"
+                style={{ color: theme.textSecondary, whiteSpace: 'nowrap' }}
+              >
+                Detail: <strong>{depth} {depth === 1 ? 'hop' : 'hops'}</strong>
+                <span style={{ color: theme.textTertiary }}>
+                  {' '}· max {maxDepth}
+                </span>
+              </label>
+              <button
+                type="button"
+                disabled={!canReset}
+                style={{
+                  ...buttonStyle,
+                  ...(!canReset ? { cursor: 'not-allowed', opacity: 0.5 } : {}),
+                }}
+                onClick={onOverview}
+              >
+                Reset view
+              </button>
+            </div>
             <input
               id="embed-graph-depth"
               type="range"
@@ -677,27 +711,23 @@ function EmbedLargeGraphControls({
               onChange={(event) => onDepthChange(Number(event.target.value))}
               aria-label={`Detail: ${depth} ${depth === 1 ? 'hop' : 'hops'}`}
               aria-valuetext={`${depth} ${depth === 1 ? 'hop' : 'hops'}`}
-              style={{ flex: 1, accentColor: theme.accent }}
-            />
-            <button
-              type="button"
-              disabled={!canReset}
               style={{
-                ...buttonStyle,
-                marginLeft: 'auto',
-                ...(!canReset ? { cursor: 'not-allowed', opacity: 0.5 } : {}),
+                display: 'block',
+                width: '100%',
+                minHeight: 44,
+                margin: '6px 0 0',
+                accentColor: theme.accent,
               }}
-              onClick={onOverview}
-            >
-              Reset view
-            </button>
+            />
           </div>
           {appliedSearch && (
             <div
               role={graphView.searchMatchCount === 0 ? 'alert' : 'status'}
               style={{
+                minHeight: 30,
                 marginTop: 8,
                 color: graphView.searchMatchCount === 0 ? '#D83B01' : theme.textSecondary,
+                lineHeight: 1.35,
               }}
             >
               {graphView.searchMatchCount === 0

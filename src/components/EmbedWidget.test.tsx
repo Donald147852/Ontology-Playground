@@ -221,7 +221,13 @@ describe('EmbedWidget', () => {
     expect(controls).toHaveTextContent(/of 350 entities/);
     expect(controls).toHaveTextContent(/of 349 relationships/);
     const detailSlider = screen.getByRole('slider', { name: 'Detail: 1 hop' });
+    const search = screen.getByRole('searchbox', { name: 'Jump to an entity' });
     expect(detailSlider).toHaveValue('1');
+    expect(detailSlider).toHaveStyle({ width: '100%', minHeight: '44px' });
+    expect(search).toHaveStyle({ minHeight: '44px', fontSize: '16px' });
+    expect(screen.getByRole('button', { name: 'Find' })).toHaveStyle({
+      minHeight: '44px',
+    });
     expect(Number(detailSlider.getAttribute('max'))).toBeGreaterThan(1);
     expect(screen.getByRole('button', { name: 'Reset view' })).toBeDisabled();
   });

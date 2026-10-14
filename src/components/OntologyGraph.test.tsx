@@ -124,6 +124,8 @@ describe('OntologyGraph adaptive rendering', () => {
 
     const resetView = screen.getByRole('button', { name: 'Reset view' });
     const detailSlider = screen.getByRole('slider', { name: 'Detail: 1 hop' });
+    expect(detailSlider.parentElement).toHaveClass('large-graph-options');
+    expect(detailSlider.previousElementSibling).toHaveClass('large-graph-detail-header');
     expect(resetView).toBeDisabled();
     expect(Number(detailSlider.getAttribute('max'))).toBeGreaterThan(1);
     fireEvent.change(detailSlider, {
@@ -190,6 +192,8 @@ describe('OntologyGraph adaptive rendering', () => {
         data: expect.objectContaining({ id: 'node-349' }),
       }),
     );
-    expect(screen.getByText('1 matching entity.')).toBeInTheDocument();
+    expect(
+      screen.getByText('1 matching entity.').closest('.large-graph-status'),
+    ).not.toBeNull();
   });
 });

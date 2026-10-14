@@ -796,6 +796,7 @@ body {
   border-radius: var(--radius-lg);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
   backdrop-filter: blur(8px);
+  box-sizing: border-box;
 }
 
 .large-graph-panel--collapsed {
@@ -872,6 +873,10 @@ body {
   color: var(--text-secondary);
 }
 
+.large-graph-counts {
+  min-height: 34px;
+}
+
 .large-graph-search {
   margin-top: 12px;
 }
@@ -907,13 +912,27 @@ body {
 }
 
 .large-graph-options {
-  gap: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
   margin-top: 10px;
 }
 
+.large-graph-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 30px;
+}
+
+.large-graph-detail-header label {
+  white-space: nowrap;
+}
+
 .large-graph-options input[type='range'] {
-  min-width: 80px;
-  flex: 1;
+  width: 100%;
   accent-color: var(--ms-blue);
   cursor: pointer;
 }
@@ -923,16 +942,21 @@ body {
   cursor: not-allowed;
 }
 
-.large-graph-options button {
-  margin-left: auto;
-}
-
 .large-graph-result {
   color: var(--ms-green);
 }
 
 .large-graph-warning {
   color: var(--ms-orange);
+}
+
+.large-graph-status {
+  min-height: 34px;
+  margin-top: 8px;
+}
+
+.large-graph-status p {
+  margin: 0;
 }
 
 .graph-legend {
@@ -1623,6 +1647,37 @@ body {
   .graph-controls {
     bottom: 12px;
     left: 12px;
+  }
+}
+
+@media (max-width: 600px), (pointer: coarse) and (max-width: 900px) {
+  .large-graph-panel {
+    max-height: min(calc(100vh - 136px), 440px);
+    max-height: min(calc(100dvh - 136px), 440px);
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .large-graph-header,
+  .large-graph-detail-header {
+    min-height: 44px;
+  }
+
+  .large-graph-panel button {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 9px 12px;
+    font-size: 14px;
+  }
+
+  .large-graph-search input {
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  .large-graph-options input[type='range'] {
+    min-height: 44px;
+    margin: 0;
   }
 }
 

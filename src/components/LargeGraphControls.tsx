@@ -74,19 +74,28 @@ export function LargeGraphControls({
                 type="search"
                 value={searchInput}
                 onChange={(event) => onSearchInputChange(event.target.value)}
-                placeholder="Name, ID, or description"
+                placeholder="Name, ID, or keyword"
               />
               <button type="submit">Find</button>
             </div>
           </form>
 
           <div className="large-graph-options">
-            <label htmlFor="large-graph-depth">
-              Detail: <strong>{depth} {depth === 1 ? 'hop' : 'hops'}</strong>
-              <span className="large-graph-depth-max">
-                {' '}· max {maxDepth}
-              </span>
-            </label>
+            <div className="large-graph-detail-header">
+              <label htmlFor="large-graph-depth">
+                Detail: <strong>{depth} {depth === 1 ? 'hop' : 'hops'}</strong>
+                <span className="large-graph-depth-max">
+                  {' '}· max {maxDepth}
+                </span>
+              </label>
+              <button
+                type="button"
+                disabled={!canReset}
+                onClick={onShowOverview}
+              >
+                Reset view
+              </button>
+            </div>
             <input
               id="large-graph-depth"
               type="range"
@@ -99,25 +108,21 @@ export function LargeGraphControls({
               aria-label={`Detail: ${depth} ${depth === 1 ? 'hop' : 'hops'}`}
               aria-valuetext={`${depth} ${depth === 1 ? 'hop' : 'hops'}`}
             />
-            <button
-              type="button"
-              disabled={!canReset}
-              onClick={onShowOverview}
-            >
-              Reset view
-            </button>
           </div>
 
-          {appliedSearch && graphView.searchMatchCount > 0 && (
-            <p className="large-graph-result">
-              {graphView.searchMatchCount.toLocaleString()} matching{' '}
-              {graphView.searchMatchCount === 1 ? 'entity' : 'entities'}.
-            </p>
-          )}
-          {appliedSearch && graphView.searchMatchCount === 0 && (
-            <p className="large-graph-warning" role="alert">
-              No matching entity was found. Showing hierarchy roots instead.
-            </p>
+          {appliedSearch && (
+            <div className="large-graph-status" aria-live="polite">
+              {graphView.searchMatchCount > 0 ? (
+                <p className="large-graph-result">
+                  {graphView.searchMatchCount.toLocaleString()} matching{' '}
+                  {graphView.searchMatchCount === 1 ? 'entity' : 'entities'}.
+                </p>
+              ) : (
+                <p className="large-graph-warning" role="alert">
+                  No matching entity was found. Showing hierarchy roots instead.
+                </p>
+              )}
+            </div>
           )}
           <p className="large-graph-hint">
             “+N” marks hidden neighbors. Double-click that entity to reveal one
