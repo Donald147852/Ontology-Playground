@@ -41,6 +41,7 @@ const graphMocks = vi.hoisted(() => {
     on: vi.fn(),
     off: vi.fn(),
     destroy: vi.fn(),
+    destroyed: vi.fn(() => false),
     container: vi.fn(() => ({})),
     elements: vi.fn(() => collection),
     edges: vi.fn(() => collection),
@@ -232,7 +233,7 @@ describe('OntologyGraph adaptive rendering', () => {
     );
   });
 
-  it('keeps a visible boundary entity anchored until expansion is requested', async () => {
+  it('lets a visible boundary entity expand and collapse without a dead end', async () => {
     const ontology = createLargeFixture();
     const initialView = createGraphView(ontology);
     const boundary = [...initialView.hiddenNeighborCounts.entries()][0];
@@ -280,31 +281,112 @@ describe('OntologyGraph adaptive rendering', () => {
       }`,
     })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Open' }));
-    expect(
-      screen.getByRole('button', { name: 'Neighbors already shown' }),
-    ).toBeDisabled();
+    const collapseButton = screen.getByRole('button', {
+      name: `Hide shown neighbors for ${boundaryName}`,
+    });
+    expect(collapseButton).toBeEnabled();
+    fireEvent.click(collapseButton);
+    await waitFor(() => {
+      expect(graphMocks.cytoscape).toHaveBeenCalledTimes(3);
+    });
+    const explicitlyCollapsedConfig =
+      graphMocks.cytoscape.mock.calls[2][0] as CapturedConfig;
+    expect(explicitlyCollapsedConfig.elements).toHaveLength(
+      initialConfig.elements.length,
+    );
+    const panelExpandButton = screen.getByRole('button', {
+      name: `Show ${hiddenNeighborCount} hidden ${
+        hiddenNeighborCount === 1 ? 'neighbor' : 'neighbors'
+      } for ${boundaryName}`,
+    });
+    expect(panelExpandButton).toBeEnabled();
+    fireEvent.click(panelExpandButton);
+    await waitFor(() => {
+      expect(graphMocks.cytoscape).toHaveBeenCalledTimes(4);
+    });
 
     fireEvent.change(screen.getByRole('slider', { name: 'Detail: 1 hop' }), {
       target: { value: '2' },
     });
     await waitFor(() => {
-      expect(graphMocks.cytoscape).toHaveBeenCalledTimes(3);
+      expect(graphMocks.cytoscape).toHaveBeenCalledTimes(5);
     });
     fireEvent.change(screen.getByRole('slider', { name: 'Detail: 2 hops' }), {
       target: { value: '1' },
     });
     await waitFor(() => {
-      expect(graphMocks.cytoscape).toHaveBeenCalledTimes(4);
+      expect(graphMocks.cytoscape).toHaveBeenCalledTimes(6);
     });
 
     const collapsedConfig =
-      graphMocks.cytoscape.mock.calls[3][0] as CapturedConfig;
+      graphMocks.cytoscape.mock.calls[5][0] as CapturedConfig;
     expect(collapsedConfig.elements).toHaveLength(initialConfig.elements.length);
     expect(screen.getByRole('button', {
       name: `Show ${hiddenNeighborCount} hidden ${
         hiddenNeighborCount === 1 ? 'neighbor' : 'neighbors'
       } for ${boundaryName}`,
     })).toBeEnabled();
+  });
+
+  it('preserves unrelated highlighted reveals when collapsing neighbors', async () => {
+    const ontology = createLargeFixture();
+    const highlightedEntityId = 'node-349';
+    const initialView = createGraphView(ontology);
+    const boundary = [...initialView.hiddenNeighborCounts.entries()][0];
+    expect(boundary).toBeDefined();
+    const [boundaryId, hiddenNeighborCount] = boundary!;
+    const boundaryName = ontology.entityTypes.find(
+      ({ id }) => id === boundaryId,
+    )?.name;
+
+    useAppStore.getState().loadOntology(ontology);
+    render(<OntologyGraph />);
+    await waitFor(() => {
+      expect(graphMocks.cytoscape).toHaveBeenCalledTimes(1);
+    });
+    act(() => {
+      useAppStore.getState().setHighlightedEntities([highlightedEntityId]);
+    });
+    await waitFor(() => {
+      expect(graphMocks.cytoscape).toHaveBeenCalledTimes(2);
+    });
+    act(() => {
+      useAppStore.getState().selectEntity(boundaryId);
+    });
+
+    const expandButton = await screen.findByRole('button', {
+      name: `Show ${hiddenNeighborCount} hidden ${
+        hiddenNeighborCount === 1 ? 'neighbor' : 'neighbors'
+      } for ${boundaryName}`,
+    });
+    const callsBeforeExpansion = graphMocks.cytoscape.mock.calls.length;
+    fireEvent.click(expandButton);
+    await waitFor(() => {
+      expect(graphMocks.cytoscape).toHaveBeenCalledTimes(
+        callsBeforeExpansion + 1,
+      );
+    });
+
+    const callsBeforeCollapse = graphMocks.cytoscape.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', {
+      name: `Hide shown neighbors for ${boundaryName}`,
+    }));
+    await waitFor(() => {
+      expect(graphMocks.cytoscape).toHaveBeenCalledTimes(
+        callsBeforeCollapse + 1,
+      );
+    });
+
+    expect(useAppStore.getState().highlightedEntities).toEqual([
+      highlightedEntityId,
+    ]);
+    const collapsedConfig =
+      graphMocks.cytoscape.mock.calls.at(-1)?.[0] as CapturedConfig;
+    expect(collapsedConfig.elements).toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({ id: highlightedEntityId }),
+      }),
+    );
   });
 
   it('clears a deep selection when lowering hierarchy detail', async () => {

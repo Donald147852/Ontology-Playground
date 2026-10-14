@@ -60,9 +60,10 @@ hop depth, and `+N` boundary expansion keep every hidden entity reachable
 without drawing the entire ontology at once. Selecting an entity does not move
 the graph; selecting a `+N` entity exposes a neighbor action beside that node.
 Expansion keeps existing entities and the viewport anchored while placing
-newly revealed hierarchy branches to avoid crossings where possible. Repeated
-node-specific expansions collapse when the detail slider changes, so reducing
-the hop count restores the requested hierarchy depth. Repeated relationship
+newly revealed hierarchy branches to avoid crossings where possible. The
+Semantic overview can hide the selected entity's shown neighborhood again, and
+all node-specific expansions collapse when the detail slider changes, so
+reducing the hop count restores the requested hierarchy depth. Relationship
 labels stay out of the overview until an entity is selected, which labels its
 visible connections, or an individual relationship is hovered or selected.
 Turtle input is not currently supported.

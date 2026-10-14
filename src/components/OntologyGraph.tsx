@@ -836,13 +836,9 @@ export function OntologyGraph() {
     clearHighlights();
   };
 
-  const handleLargeDepthChange = (nextDepth: number) => {
-    if (nextDepth === largeDepth) return;
-    preserveCurrentGraphPosition();
-    const nextView = createGraphView(currentOntology, {
-      search: largeSearch,
-      depth: nextDepth,
-    });
+  const clearSelectionOutsideView = (
+    nextView: ReturnType<typeof createGraphView>,
+  ) => {
     const nextEntityIds = new Set(
       nextView.entities.map(({ id }) => id),
     );
@@ -850,7 +846,6 @@ export function OntologyGraph() {
       nextView.relationships.map(({ id }) => id),
     );
 
-    setExpandedNodeIds(new Set());
     if (selectedEntityId && !nextEntityIds.has(selectedEntityId)) {
       selectEntity(null);
     }
@@ -860,6 +855,18 @@ export function OntologyGraph() {
     ) {
       selectRelationship(null);
     }
+  };
+
+  const clearItemsOutsideView = (
+    nextView: ReturnType<typeof createGraphView>,
+  ) => {
+    clearSelectionOutsideView(nextView);
+    const nextEntityIds = new Set(
+      nextView.entities.map(({ id }) => id),
+    );
+    const nextRelationshipIds = new Set(
+      nextView.relationships.map(({ id }) => id),
+    );
     if (
       highlightedEntities.some((id) => !nextEntityIds.has(id))
       || highlightedRelationships.some(
@@ -868,6 +875,18 @@ export function OntologyGraph() {
     ) {
       clearHighlights();
     }
+  };
+
+  const handleLargeDepthChange = (nextDepth: number) => {
+    if (nextDepth === largeDepth) return;
+    preserveCurrentGraphPosition();
+    const nextView = createGraphView(currentOntology, {
+      search: largeSearch,
+      depth: nextDepth,
+    });
+
+    setExpandedNodeIds(new Set());
+    clearItemsOutsideView(nextView);
     setLargeDepth(nextDepth);
   };
 
@@ -885,6 +904,22 @@ export function OntologyGraph() {
       if (current.has(selectedOverviewEntity.id)) return current;
       return new Set(current).add(selectedOverviewEntity.id);
     });
+  };
+
+  const handleCollapseSelectedEntity = () => {
+    if (!selectedOverviewEntity?.isExpanded) return;
+
+    preserveCurrentGraphPosition(selectedOverviewEntity.id);
+    const nextExpandedNodeIds = new Set(expandedNodeIds);
+    nextExpandedNodeIds.delete(selectedOverviewEntity.id);
+    const nextView = createGraphView(currentOntology, {
+      search: largeSearch,
+      depth: largeDepth,
+      expandedNodeIds: nextExpandedNodeIds,
+    });
+
+    setExpandedNodeIds(nextExpandedNodeIds);
+    clearSelectionOutsideView(nextView);
   };
 
   const handleDownload = () => {
@@ -934,6 +969,7 @@ export function OntologyGraph() {
           onSearch={handleLargeSearch}
           onDepthChange={handleLargeDepthChange}
           onExpandSelectedEntity={handleExpandSelectedEntity}
+          onCollapseSelectedEntity={handleCollapseSelectedEntity}
           onShowOverview={handleShowOverview}
         />
       )}

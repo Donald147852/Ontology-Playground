@@ -19,6 +19,7 @@ interface LargeGraphControlsProps {
   onSearch: () => void;
   onDepthChange: (depth: number) => void;
   onExpandSelectedEntity: () => void;
+  onCollapseSelectedEntity: () => void;
   onShowOverview: () => void;
 }
 
@@ -36,6 +37,7 @@ export function LargeGraphControls({
   onSearch,
   onDepthChange,
   onExpandSelectedEntity,
+  onCollapseSelectedEntity,
   onShowOverview,
 }: LargeGraphControlsProps) {
   const [collapsed, setCollapsed] = useState(false);
@@ -119,9 +121,17 @@ export function LargeGraphControls({
           </div>
 
           <div className="large-graph-selection-action">
-            {selectedEntity
+            {selectedEntity?.isExpanded ? (
+              <button
+                type="button"
+                aria-label={`Hide shown neighbors for ${selectedEntity.name}`}
+                onClick={onCollapseSelectedEntity}
+              >
+                Hide shown neighbors
+              </button>
+            ) : selectedEntity
               && selectedEntity.hiddenNeighborCount > 0
-              && !selectedEntity.isExpanded ? (
+              ? (
                 <button
                   type="button"
                   aria-label={`Show ${selectedEntity.hiddenNeighborCount} hidden ${
@@ -140,9 +150,7 @@ export function LargeGraphControls({
                 <button type="button" disabled>
                   {!selectedEntity
                     ? 'Select a +N entity to show neighbors'
-                    : selectedEntity.isExpanded
-                      ? 'Neighbors already shown'
-                      : 'No hidden neighbors for this entity'}
+                    : 'No hidden neighbors for this entity'}
                 </button>
               )}
           </div>
@@ -163,7 +171,9 @@ export function LargeGraphControls({
           )}
           <p className="large-graph-hint">
             Select a dashed “+N” entity to show its neighbor action beside the
-            node. Selecting any entity also labels its visible relationships.
+            node. Hide a shown neighborhood here, or select another “+N” entity
+            to continue. Selecting any entity also labels its visible
+            relationships.
           </p>
         </>
       )}

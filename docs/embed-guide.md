@@ -139,7 +139,7 @@ This scans the DOM for new `.ontology-embed` elements and mounts widgets on any 
 - **Interactive graph** — pan, zoom, click nodes and edges
 - **Adaptive large-ontology view** — massive ontologies open as a bounded
   semantic overview with search, adjustable hierarchy depth, and incremental
-  `+N` boundary expansion
+  `+N` boundary expansion that can be hidden again from the overview controls
 - **Inspector overlay** — click any entity or relationship to see its properties
 - **RDF Source tab** — view the generated RDF/XML with a Copy button
 - **Dark & light themes** — match your site's design

@@ -15,12 +15,16 @@ export function useGraphNodeActionPosition(
   const [position, setPosition] = useState<GraphNodeActionPosition | null>(null);
 
   useEffect(() => {
-    if (!cy || !nodeId || !enabled) {
+    if (!cy || cy.destroyed() || !nodeId || !enabled) {
       setPosition(null);
       return;
     }
 
     const updatePosition = () => {
+      if (cy.destroyed()) {
+        setPosition(null);
+        return;
+      }
       const node = cy.getElementById(nodeId);
       if (node.length === 0) {
         setPosition(null);

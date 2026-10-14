@@ -141,6 +141,7 @@ const embedGraphMocks = vi.hoisted(() => {
     },
     off: vi.fn(),
     destroy: vi.fn(),
+    destroyed: vi.fn(() => false),
     container: () => document.createElement('div'),
     elements: () => nodes,
     edges: () => nodes,
@@ -425,20 +426,46 @@ describe('EmbedWidget', () => {
     expect(expandAction).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Open' }));
+    const collapseButton = screen.getByRole('button', {
+      name: `Hide shown neighbors for ${boundaryEntity?.name}`,
+    });
+    expect(collapseButton).toBeEnabled();
+    await user.click(collapseButton);
+    await waitFor(() => {
+      expect(embedGraphMocks.cytoscape).toHaveBeenCalledTimes(3);
+    });
+    const explicitlyCollapsedConfig =
+      embedGraphMocks.cytoscape.mock.calls[2][0] as {
+        elements: unknown[];
+      };
+    expect(explicitlyCollapsedConfig.elements).toHaveLength(
+      initialConfig.elements.length,
+    );
+    const panelExpandButton = screen.getByRole('button', {
+      name: `Show ${hiddenNeighborCount} hidden ${
+        hiddenNeighborCount === 1 ? 'neighbor' : 'neighbors'
+      } for ${boundaryEntity?.name}`,
+    });
+    expect(panelExpandButton).toBeEnabled();
+    await user.click(panelExpandButton);
+    await waitFor(() => {
+      expect(embedGraphMocks.cytoscape).toHaveBeenCalledTimes(4);
+    });
+
     fireEvent.change(screen.getByRole('slider', { name: 'Detail: 1 hop' }), {
       target: { value: '2' },
     });
     await waitFor(() => {
-      expect(embedGraphMocks.cytoscape).toHaveBeenCalledTimes(3);
+      expect(embedGraphMocks.cytoscape).toHaveBeenCalledTimes(5);
     });
     fireEvent.change(screen.getByRole('slider', { name: 'Detail: 2 hops' }), {
       target: { value: '1' },
     });
     await waitFor(() => {
-      expect(embedGraphMocks.cytoscape).toHaveBeenCalledTimes(4);
+      expect(embedGraphMocks.cytoscape).toHaveBeenCalledTimes(6);
     });
 
-    const collapsedConfig = embedGraphMocks.cytoscape.mock.calls[3][0] as {
+    const collapsedConfig = embedGraphMocks.cytoscape.mock.calls[5][0] as {
       elements: unknown[];
     };
     expect(collapsedConfig.elements).toHaveLength(initialConfig.elements.length);

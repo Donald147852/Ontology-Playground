@@ -614,17 +614,9 @@ function EmbedGraph({ ontology, theme, selected, setSelected }: EmbedGraphProps)
     setSelected(null);
   };
 
-  const handleDepthChange = (nextDepth: number) => {
-    if (nextDepth === depth) return;
-    pendingPositionSnapshotRef.current = cyRef.current
-      ? captureGraphPositionSnapshot(cyRef.current)
-      : null;
-    const nextView = createGraphView(ontology, {
-      search,
-      depth: nextDepth,
-    });
-
-    setExpandedNodeIds(new Set());
+  const clearSelectionOutsideView = (
+    nextView: ReturnType<typeof createGraphView>,
+  ) => {
     if (
       (
         selected?.entity
@@ -639,6 +631,20 @@ function EmbedGraph({ ontology, theme, selected, setSelected }: EmbedGraphProps)
     ) {
       setSelected(null);
     }
+  };
+
+  const handleDepthChange = (nextDepth: number) => {
+    if (nextDepth === depth) return;
+    pendingPositionSnapshotRef.current = cyRef.current
+      ? captureGraphPositionSnapshot(cyRef.current)
+      : null;
+    const nextView = createGraphView(ontology, {
+      search,
+      depth: nextDepth,
+    });
+
+    setExpandedNodeIds(new Set());
+    clearSelectionOutsideView(nextView);
     setDepth(nextDepth);
   };
 
@@ -661,6 +667,27 @@ function EmbedGraph({ ontology, theme, selected, setSelected }: EmbedGraphProps)
       if (current.has(selectedOverviewEntity.id)) return current;
       return new Set(current).add(selectedOverviewEntity.id);
     });
+  };
+
+  const handleCollapseSelectedEntity = () => {
+    if (!selectedOverviewEntity?.isExpanded) return;
+
+    pendingPositionSnapshotRef.current = cyRef.current
+      ? captureGraphPositionSnapshot(
+          cyRef.current,
+          selectedOverviewEntity.id,
+        )
+      : null;
+    const nextExpandedNodeIds = new Set(expandedNodeIds);
+    nextExpandedNodeIds.delete(selectedOverviewEntity.id);
+    const nextView = createGraphView(ontology, {
+      search,
+      depth,
+      expandedNodeIds: nextExpandedNodeIds,
+    });
+
+    setExpandedNodeIds(nextExpandedNodeIds);
+    clearSelectionOutsideView(nextView);
   };
 
   return (
@@ -730,6 +757,7 @@ function EmbedGraph({ ontology, theme, selected, setSelected }: EmbedGraphProps)
           onSearch={handleSearch}
           onDepthChange={handleDepthChange}
           onExpandSelectedEntity={handleExpandSelectedEntity}
+          onCollapseSelectedEntity={handleCollapseSelectedEntity}
           onOverview={handleOverview}
         />
       )}
@@ -756,6 +784,7 @@ interface EmbedLargeGraphControlsProps {
   onSearch: () => void;
   onDepthChange: (depth: number) => void;
   onExpandSelectedEntity: () => void;
+  onCollapseSelectedEntity: () => void;
   onOverview: () => void;
 }
 
@@ -774,6 +803,7 @@ function EmbedLargeGraphControls({
   onSearch,
   onDepthChange,
   onExpandSelectedEntity,
+  onCollapseSelectedEntity,
   onOverview,
 }: EmbedLargeGraphControlsProps) {
   const [collapsed, setCollapsed] = useState(false);
@@ -918,9 +948,18 @@ function EmbedLargeGraphControls({
             minHeight: 44,
             marginTop: 8,
           }}>
-            {selectedEntity
+            {selectedEntity?.isExpanded ? (
+              <button
+                type="button"
+                aria-label={`Hide shown neighbors for ${selectedEntity.name}`}
+                style={{ ...buttonStyle, width: '100%' }}
+                onClick={onCollapseSelectedEntity}
+              >
+                Hide shown neighbors
+              </button>
+            ) : selectedEntity
               && selectedEntity.hiddenNeighborCount > 0
-              && !selectedEntity.isExpanded ? (
+              ? (
                 <button
                   type="button"
                   aria-label={`Show ${selectedEntity.hiddenNeighborCount} hidden ${
@@ -949,9 +988,7 @@ function EmbedLargeGraphControls({
                 >
                   {!selectedEntity
                     ? 'Select a +N entity to show neighbors'
-                    : selectedEntity.isExpanded
-                      ? 'Neighbors already shown'
-                      : 'No hidden neighbors for this entity'}
+                    : 'No hidden neighbors for this entity'}
                 </button>
               )}
           </div>
@@ -972,7 +1009,9 @@ function EmbedLargeGraphControls({
           )}
           <div style={{ marginTop: 8, color: theme.textTertiary, lineHeight: 1.35 }}>
             Select a dashed “+N” entity to show its neighbor action beside the
-            {' '}node. Selecting any entity also labels its visible relationships.
+            {' '}node. Hide a shown neighborhood here, or select another “+N”
+            {' '}entity to continue. Selecting any entity also labels its visible
+            {' '}relationships.
           </div>
         </>
       )}
