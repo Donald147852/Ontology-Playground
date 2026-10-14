@@ -24,10 +24,19 @@ const graphMocks = vi.hoisted(() => {
     closedNeighborhood: chain,
     toggleClass: chain,
     forEach: vi.fn(),
+    renderedBoundingBox: vi.fn(() => ({
+      x1: 200,
+      y1: 200,
+      x2: 240,
+      y2: 240,
+      w: 40,
+      h: 40,
+    })),
   });
 
   const cy = {
     on: vi.fn(),
+    off: vi.fn(),
     destroy: vi.fn(),
     container: vi.fn(() => ({})),
     elements: vi.fn(() => collection),
@@ -37,6 +46,8 @@ const graphMocks = vi.hoisted(() => {
     getElementById: vi.fn(() => collection),
     layout: vi.fn(() => ({ run: vi.fn() })),
     zoom: vi.fn(() => 1),
+    width: vi.fn(() => 800),
+    height: vi.fn(() => 600),
     center: vi.fn(),
     fit: vi.fn(),
     png: vi.fn(() => 'data:image/png;base64,test'),
@@ -175,22 +186,37 @@ describe('OntologyGraph adaptive rendering', () => {
     await waitFor(() => {
       expect(graphMocks.cytoscape).toHaveBeenCalledTimes(1);
     });
+    fireEvent.click(screen.getByRole('button', { name: 'Hide' }));
 
     act(() => {
       useAppStore.getState().selectEntity(boundaryId);
     });
 
+    const boundaryName = ontology.entityTypes.find(
+      ({ id }) => id === boundaryId,
+    )?.name;
     const expandButton = await screen.findByRole('button', {
-      name: `Show ${hiddenNeighborCount} hidden ${
+      name: `Expand ${boundaryName} to show ${hiddenNeighborCount} hidden ${
         hiddenNeighborCount === 1 ? 'neighbor' : 'neighbors'
-      } for ${ontology.entityTypes.find(({ id }) => id === boundaryId)?.name}`,
+      }`,
     });
+    expect(expandButton).toHaveClass(
+      'graph-neighbor-action',
+      'graph-neighbor-action--above',
+    );
+    expect(expandButton).toHaveStyle({ left: '220px', top: '190px' });
     expect(graphMocks.cytoscape).toHaveBeenCalledTimes(1);
 
     fireEvent.click(expandButton);
     await waitFor(() => {
       expect(graphMocks.cytoscape).toHaveBeenCalledTimes(2);
     });
+    expect(screen.queryByRole('button', {
+      name: `Expand ${boundaryName} to show ${hiddenNeighborCount} hidden ${
+        hiddenNeighborCount === 1 ? 'neighbor' : 'neighbors'
+      }`,
+    })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
     expect(
       screen.getByRole('button', { name: 'Neighbors already shown' }),
     ).toBeDisabled();

@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { EmbedWidget } from './EmbedWidget';
 import type { EmbedConfig } from './EmbedWidget';
 import type { Ontology } from '../data/ontology';
 import type { Catalogue } from '../types/catalogue';
+import { createGraphView } from '../lib/graphView';
 
 // Minimal ontology for testing (ASCII-only icons to avoid btoa encoding issues in jsdom)
 const testOntology: Ontology = {
@@ -70,32 +71,66 @@ function mockFetch(data: unknown, ok = true) {
   } as Response);
 }
 
-/* Cytoscape needs a DOM container with dimensions. 
-   jsdom doesn't render so we mock cytoscape to avoid layout errors. */
-vi.mock('cytoscape', () => {
-  type MockHandler = (...args: unknown[]) => void;
+type MockHandler = (...args: unknown[]) => void;
+
+const embedGraphMocks = vi.hoisted(() => {
   const handlers: Record<string, MockHandler[]> = {};
-  const nodes = { toggleClass: vi.fn() };
+  const nodes = {
+    length: 1,
+    toggleClass: vi.fn(),
+    select: vi.fn(),
+    renderedBoundingBox: vi.fn(() => ({
+      x1: 200,
+      y1: 200,
+      x2: 240,
+      y2: 240,
+      w: 40,
+      h: 40,
+    })),
+    forEach: vi.fn((callback: (node: {
+      id: () => string;
+      position: () => { x: number; y: number };
+    }) => void) => {
+      callback({
+        id: () => 'node-0',
+        position: () => ({ x: 100, y: 100 }),
+      });
+    }),
+  };
   const mockCy = {
     on: (event: string, selectorOrFn: string | MockHandler, maybeFn?: MockHandler) => {
       const fn = maybeFn || selectorOrFn as MockHandler;
       const key = typeof selectorOrFn === 'string' ? `${event}:${selectorOrFn}` : event;
       (handlers[key] ||= []).push(fn);
     },
+    off: vi.fn(),
     destroy: vi.fn(),
     container: () => document.createElement('div'),
     nodes: () => nodes,
-    zoom: () => 1,
+    getElementById: () => nodes,
+    zoom: vi.fn(() => 1),
+    pan: vi.fn(() => ({ x: 0, y: 0 })),
+    width: vi.fn(() => 800),
+    height: vi.fn(() => 600),
   };
   const cytoscape = vi.fn(() => mockCy);
   Object.assign(cytoscape, { use: vi.fn() });
-  return { default: cytoscape };
+  return { cytoscape, handlers };
+});
+
+/* Cytoscape needs a DOM container with dimensions.
+   jsdom doesn't render so we mock cytoscape to avoid layout errors. */
+vi.mock('cytoscape', () => {
+  return { default: embedGraphMocks.cytoscape };
 });
 
 vi.mock('cytoscape-fcose', () => ({ default: vi.fn() }));
 
 beforeEach(() => {
   vi.clearAllMocks();
+  for (const key of Object.keys(embedGraphMocks.handlers)) {
+    delete embedGraphMocks.handlers[key];
+  }
 });
 
 afterEach(() => {
@@ -235,6 +270,53 @@ describe('EmbedWidget', () => {
         name: 'Select a +N entity to show neighbors',
       }),
     ).toBeDisabled();
+  });
+
+  it('shows neighbor expansion beside a selected +N entity', async () => {
+    const ontology = createLargeOntology();
+    const graphView = createGraphView(ontology);
+    const boundary = [...graphView.hiddenNeighborCounts.entries()][0];
+    expect(boundary).toBeDefined();
+    const [boundaryId, hiddenNeighborCount] = boundary!;
+    const boundaryEntity = ontology.entityTypes.find(
+      ({ id }) => id === boundaryId,
+    );
+    expect(boundaryEntity).toBeDefined();
+    const config: EmbedConfig = {
+      ontologyInline: btoa(JSON.stringify(ontology)),
+      theme: 'dark',
+      height: '400px',
+    };
+    const user = userEvent.setup();
+
+    render(<EmbedWidget config={config} />);
+
+    await screen.findByRole('region', { name: 'Large ontology controls' });
+    await user.click(screen.getByRole('button', { name: 'Hide' }));
+    const nodeTapHandlers = embedGraphMocks.handlers['tap:node'];
+    expect(nodeTapHandlers).toBeDefined();
+    act(() => {
+      nodeTapHandlers.at(-1)?.({
+        target: { id: () => boundaryId },
+      });
+    });
+
+    const expandAction = await screen.findByRole('button', {
+      name: `Expand ${boundaryEntity?.name} to show ${hiddenNeighborCount} hidden ${
+        hiddenNeighborCount === 1 ? 'neighbor' : 'neighbors'
+      }`,
+    });
+    expect(expandAction).toHaveStyle({
+      left: '220px',
+      top: '190px',
+      minHeight: '44px',
+    });
+
+    await user.click(expandAction);
+    await waitFor(() => {
+      expect(embedGraphMocks.cytoscape).toHaveBeenCalledTimes(2);
+    });
+    expect(expandAction).not.toBeInTheDocument();
   });
 
   it('reveals deep entities through embedded overview search', async () => {

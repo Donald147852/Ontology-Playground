@@ -9,7 +9,13 @@
  *  - Dark/light theme
  *  - Loads ontology from catalogue, URL, or inline base64 JSON
  */
-import { useEffect, useRef, useState, useMemo, type FormEvent } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  useMemo,
+  type FormEvent,
+} from 'react';
 import cytoscape from 'cytoscape';
 import fcose from 'cytoscape-fcose';
 import type {
@@ -36,6 +42,7 @@ import {
   type GraphPositionSnapshot,
 } from '../lib/graphPositionPersistence';
 import type { Catalogue } from '../types/catalogue';
+import { useGraphNodeActionPosition } from './useGraphNodeActionPosition';
 
 cytoscape.use(fcose);
 
@@ -283,6 +290,7 @@ interface EmbedGraphProps {
 function EmbedGraph({ ontology, theme, selected, setSelected }: EmbedGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
+  const [graphInstance, setGraphInstance] = useState<Core | null>(null);
   const pendingPositionSnapshotRef = useRef<GraphPositionSnapshot | null>(null);
   const selectedRef = useRef(selected);
   useEffect(() => {
@@ -317,6 +325,13 @@ function EmbedGraph({ ontology, theme, selected, setSelected }: EmbedGraphProps)
     graphView.hiddenNeighborCounts,
     selected,
   ]);
+  const neighborActionPosition = useGraphNodeActionPosition(
+    graphInstance,
+    selectedOverviewEntity?.id ?? null,
+    graphView.mode === 'bounded'
+      && (selectedOverviewEntity?.hiddenNeighborCount ?? 0) > 0
+      && !selectedOverviewEntity?.isExpanded,
+  );
   const graphOntologyRef = useRef(ontology);
 
   useEffect(() => {
@@ -553,6 +568,7 @@ function EmbedGraph({ ontology, theme, selected, setSelected }: EmbedGraphProps)
     });
 
     cyRef.current = cy;
+    setGraphInstance(cy);
     const selectedItem = selectedRef.current;
     if (selectedItem?.entity) {
       cy.getElementById(selectedItem.entity.id).select();
@@ -621,6 +637,45 @@ function EmbedGraph({ ontology, theme, selected, setSelected }: EmbedGraphProps)
         data-testid="embed-graph-canvas"
         style={{ width: '100%', height: '100%' }}
       />
+      {neighborActionPosition && selectedOverviewEntity && (
+        <button
+          type="button"
+          aria-label={`Expand ${selectedOverviewEntity.name} to show ${
+            selectedOverviewEntity.hiddenNeighborCount
+          } hidden ${
+            selectedOverviewEntity.hiddenNeighborCount === 1
+              ? 'neighbor'
+              : 'neighbors'
+          }`}
+          onClick={handleExpandSelectedEntity}
+          style={{
+            position: 'absolute',
+            zIndex: 3,
+            left: neighborActionPosition.left,
+            top: neighborActionPosition.top,
+            transform: neighborActionPosition.placement === 'above'
+              ? 'translate(-50%, -100%)'
+              : 'translate(-50%, 0)',
+            minHeight: 44,
+            maxWidth: 'calc(100% - 24px)',
+            padding: '9px 14px',
+            color: '#fff',
+            background: theme.accent,
+            border: '1px solid #fff',
+            borderRadius: 18,
+            boxShadow: '0 4px 14px rgba(0,0,0,0.35)',
+            cursor: 'pointer',
+            fontSize: 14,
+            fontWeight: 600,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          Show {selectedOverviewEntity.hiddenNeighborCount.toLocaleString()}{' '}
+          {selectedOverviewEntity.hiddenNeighborCount === 1
+            ? 'neighbor'
+            : 'neighbors'}
+        </button>
+      )}
       {graphView.mode === 'bounded' && (
         <EmbedLargeGraphControls
           graphView={graphView}
@@ -883,8 +938,8 @@ function EmbedLargeGraphControls({
             </div>
           )}
           <div style={{ marginTop: 8, color: theme.textTertiary, lineHeight: 1.35 }}>
-            Select a dashed “+N” entity to enable Show neighbors above. Hover
-            {' '}over or select a relationship to show its name.
+            Select a dashed “+N” entity to show its neighbor action beside the
+            {' '}node. Hover over or select a relationship to show its name.
           </div>
         </>
       )}

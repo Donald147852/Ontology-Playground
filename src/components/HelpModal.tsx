@@ -41,7 +41,7 @@ export function HelpModal({ onClose }: HelpModalProps) {
               <br /><br />
               Very large ontologies open as a bounded <strong>semantic overview</strong> instead of drawing every entity at once.
               Use its search and detail controls to navigate the hierarchy. A dashed node labeled <strong>+N</strong> has hidden neighbors;
-              select it and choose <strong>Show neighbors</strong> to expand it without moving the entities already on screen.
+              select it and choose the <strong>Show neighbors</strong> action beside the node to expand it without moving the entities already on screen.
               Relationship names appear when you hover over or select a connection.
               Search &amp; Filter can still jump to any entity in the complete ontology.
             </p>

@@ -23,6 +23,7 @@ import {
   type GraphPositionSnapshot,
 } from '../lib/graphPositionPersistence';
 import { LargeGraphControls } from './LargeGraphControls';
+import { useGraphNodeActionPosition } from './useGraphNodeActionPosition';
 
 // Register fcose layout
 cytoscape.use(fcose);
@@ -97,6 +98,7 @@ function readGraphColors(darkMode: boolean, el?: HTMLElement | null): GraphColor
 
 export function OntologyGraph() {
   const cyRef = useRef<Core | null>(null);
+  const [graphInstance, setGraphInstance] = useState<Core | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const mountedRef = useRef(true);
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
@@ -276,6 +278,13 @@ export function OntologyGraph() {
     graphView.hiddenNeighborCounts,
     selectedEntityId,
   ]);
+  const neighborActionPosition = useGraphNodeActionPosition(
+    graphInstance,
+    selectedOverviewEntity?.id ?? null,
+    isBoundedView
+      && (selectedOverviewEntity?.hiddenNeighborCount ?? 0) > 0
+      && !selectedOverviewEntity?.isExpanded,
+  );
   const graphRootIds = useMemo(() => {
     const visibleIds = new Set(graphView.entities.map((entity) => entity.id));
     const visibleRootIds = graphView.rootIds.filter((id) => visibleIds.has(id));
@@ -633,6 +642,7 @@ export function OntologyGraph() {
     });
 
     cyRef.current = cy;
+    setGraphInstance(cy);
     window.__ONTOLOGY_PREVIEW_CY__ = cy;
     mountedRef.current = true;
     applySelectionState(cy);
@@ -876,6 +886,30 @@ export function OntologyGraph() {
           onExpandSelectedEntity={handleExpandSelectedEntity}
           onShowOverview={handleShowOverview}
         />
+      )}
+
+      {neighborActionPosition && selectedOverviewEntity && (
+        <button
+          type="button"
+          className={`graph-neighbor-action graph-neighbor-action--${neighborActionPosition.placement}`}
+          style={{
+            left: neighborActionPosition.left,
+            top: neighborActionPosition.top,
+          }}
+          aria-label={`Expand ${selectedOverviewEntity.name} to show ${
+            selectedOverviewEntity.hiddenNeighborCount
+          } hidden ${
+            selectedOverviewEntity.hiddenNeighborCount === 1
+              ? 'neighbor'
+              : 'neighbors'
+          }`}
+          onClick={handleExpandSelectedEntity}
+        >
+          Show {selectedOverviewEntity.hiddenNeighborCount.toLocaleString()}{' '}
+          {selectedOverviewEntity.hiddenNeighborCount === 1
+            ? 'neighbor'
+            : 'neighbors'}
+        </button>
       )}
 
       {focusNodeId && !isBoundedView && (

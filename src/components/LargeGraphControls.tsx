@@ -162,8 +162,8 @@ export function LargeGraphControls({
             </div>
           )}
           <p className="large-graph-hint">
-            Select a dashed “+N” entity to enable Show neighbors above. Hover
-            over or select a relationship to show its name.
+            Select a dashed “+N” entity to show its neighbor action beside the
+            node. Hover over or select a relationship to show its name.
           </p>
         </>
       )}
