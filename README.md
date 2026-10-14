@@ -47,15 +47,19 @@ and export to RDF/XML or JSON.
 ### RDF Import & Export
 
 Import and export the Playground's supported RDF/XML subset: OWL classes,
-datatype properties, object properties with cardinalities, and internal
-`rdfs:subClassOf` hierarchies. The importer accepts typed elements and the
-equivalent `rdf:Description` / `rdf:type` syntax. Export in the format Microsoft
-Fabric IQ expects, with automated round-trip tests for Playground-generated
-RDF. Imported class hierarchies remain `rdfs:subClassOf` statements on export
-and are not misrepresented as Fabric relationship types. Large graphs
-automatically use a fast grid layout and bounded UI lists instead of running an
-expensive force layout over every element. Turtle input is not currently
-supported.
+datatype properties, object properties, and internal `rdfs:subClassOf`
+hierarchies. The importer accepts typed elements and the equivalent
+`rdf:Description` / `rdf:type` syntax. Exports can use either the lossless
+Playground round-trip profile or a standards-oriented OWL + SHACL profile. The
+standards profile represents property order, enums, identifiers, relationship
+cardinality, and relationship attributes with interoperable vocabulary instead
+of treating Playground metadata as Fabric vocabulary. Imported class
+hierarchies remain `rdfs:subClassOf` statements on export and are not
+misrepresented as Fabric relationship types. Large graphs automatically use a
+fast grid layout and bounded UI lists instead of running an expensive force
+layout over every element. Turtle input is not currently supported. See the
+[RDF export profiles guide](docs/rdf-export-profiles.md) for the exact
+contracts and limitations.
 
 ### One-Click Catalogue PR
 
@@ -250,6 +254,7 @@ The table below lists the main end-user and contributor guides. Internal plannin
 | Guide | Description |
 |-------|-------------|
 | [Ontology Authoring Guide](docs/authoring-guide.md) | How to create ontologies that work well in the Playground — field-by-field reference, best practices, and a step-by-step walkthrough |
+| [RDF Export Profiles](docs/rdf-export-profiles.md) | When to use the lossless Playground round-trip profile or the standards-oriented OWL + SHACL profile |
 | [Contribute an Ontology: From Design to GitHub](docs/contributing-ontology-from-design-to-github.md) | End-to-end contributor workflow: design, RDF export, metadata, local validation, and pull request |
 | [Embedding Guide](docs/embed-guide.md) | How to embed interactive ontology widgets on any web page |
 | [GitHub OAuth Setup](docs/github-oauth-setup.md) | How to configure GitHub OAuth for one-click catalogue PRs |

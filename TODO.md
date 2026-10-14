@@ -55,6 +55,18 @@ The current RDF export is inline in `ImportExportModal.tsx` and there is no RDF
 - [x] Add `"test": "vitest run"` and `"test:watch": "vitest"` to
   `package.json` scripts
 
+### 1.4 Standards-oriented generated exports
+- [x] Keep the lossless Playground round-trip profile as a distinct export
+  contract
+- [x] Declare Playground metadata in a stable project namespace rather than
+  the generated domain namespace
+- [x] Add an OWL + SHACL profile for property order, enums, identifiers, and
+  relationship cardinality
+- [x] Model relationship attributes as RDF 1.1-compatible association classes
+- [x] Parse the generated standard constraints so statement reordering does not
+  break round trips
+- [x] Document what each profile preserves and omits
+
 ---
 
 ## 2. Fully static site (Azure Static Web Apps + GitHub Pages)

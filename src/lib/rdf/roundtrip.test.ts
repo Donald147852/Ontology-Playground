@@ -222,4 +222,103 @@ describe('RDF round-trip tests', () => {
       ontology.entityTypes[0].properties[0].description,
     );
   });
+
+  it('round-trips standard OWL and SHACL semantics after statement reordering', () => {
+    const ontology: Ontology = {
+      name: 'Interoperability',
+      description: 'Tests the standards-oriented export profile',
+      entityTypes: [
+        {
+          id: 'person',
+          name: 'Person',
+          description: 'A person',
+          icon: '📦',
+          color: '#0078D4',
+          properties: [
+            { name: 'personId', type: 'string', isIdentifier: true },
+            { name: 'status', type: 'enum', values: ['Active', 'Inactive'] },
+            { name: 'displayName', type: 'string' },
+          ],
+        },
+        {
+          id: 'team',
+          name: 'Team',
+          description: 'A team',
+          icon: '📦',
+          color: '#0078D4',
+          properties: [],
+        },
+        {
+          id: 'office',
+          name: 'Office',
+          description: 'An office',
+          icon: '📦',
+          color: '#0078D4',
+          properties: [],
+        },
+      ],
+      relationships: [
+        {
+          id: 'person_member_of_team',
+          name: 'related to',
+          from: 'person',
+          to: 'team',
+          cardinality: 'many-to-one',
+          attributes: [
+            { name: 'role', type: 'string' },
+            { name: 'since', type: 'date' },
+          ],
+        },
+        {
+          id: 'person_assigned_office',
+          name: 'related to',
+          from: 'person',
+          to: 'office',
+          cardinality: 'one-to-one',
+        },
+        {
+          id: 'team_has_person',
+          name: 'contains',
+          from: 'team',
+          to: 'person',
+          cardinality: 'one-to-many',
+        },
+        {
+          id: 'team_collaborates_office',
+          name: 'collaborates with',
+          from: 'team',
+          to: 'office',
+          cardinality: 'many-to-many',
+        },
+      ],
+    };
+
+    const rdf = serializeToRDF(ontology, [], { profile: 'standards' });
+    const document = new DOMParser().parseFromString(rdf, 'application/xml');
+    const elements = Array.from(document.querySelectorAll('*'));
+    for (const element of elements) {
+      const children = Array.from(element.children);
+      children.reverse().forEach((child) => element.appendChild(child));
+    }
+    const reordered = new XMLSerializer().serializeToString(document);
+
+    const { ontology: parsed } = parseRDF(reordered);
+    const normalizeResourceOrder = (value: Ontology): Ontology => ({
+      ...value,
+      entityTypes: [...value.entityTypes].sort((left, right) => (
+        left.id.localeCompare(right.id)
+      )),
+      relationships: [...value.relationships].sort((left, right) => (
+        left.id.localeCompare(right.id)
+      )),
+    });
+
+    expectOntologiesEqual(
+      normalizeResourceOrder(parsed),
+      normalizeResourceOrder(ontology),
+    );
+    expect(parsed.relationships.filter((relationship) => (
+      relationship.name === 'related to'
+    ))).toHaveLength(2);
+  });
 });
