@@ -9,6 +9,7 @@
     "learn:build": "tsx scripts/compile-learn.ts",
     "build": "npm run catalogue:build && npm run learn:build && tsc -b && vite build && npm run build:embed",
     "build:embed": "vite build --config vite.config.embed.ts",
+    "deployment:validate": "tsx scripts/validate-deployment-boundaries.ts",
     "lint": "eslint .",
     "hooks:install": "git config core.hooksPath .githooks",
     "preview": "vite preview",

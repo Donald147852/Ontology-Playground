@@ -191,31 +191,29 @@ npm run test:watch  # watch mode
 
 ## Deployment
 
-### Azure Static Web Apps (primary)
+### GitHub Pages (official)
 
-The repo ships with a GitHub Actions workflow that deploys to Azure SWA on every
-push to `main`.
+The public Ontology Playground is deployed from `main` to GitHub Pages by
+`.github/workflows/deploy-ghpages.yml`. The workflow publishes only the static
+`build/` output; it does not deploy the optional `api/` package.
 
-1. Create a Static Web App in the Azure Portal
-2. Connect to your GitHub repository
-3. Copy the deployment token and add it as the GitHub secret
-   `AZURE_STATIC_WEB_APPS_API_TOKEN_GREEN_PLANT_0BB1D2910`
-4. Push to `main` — the workflow at
-   `.github/workflows/azure-static-web-apps-green-plant-0bb1d2910.yml` handles
-   the rest
-5. PR preview environments are created automatically for pull requests
+Fork owners can use GitHub Pages by changing the workflow's repository guard,
+then selecting **GitHub Actions** under **Settings → Pages → Source**. The
+`VITE_BASE_PATH` environment variable is set to `/<repo-name>/` during the
+build so asset paths resolve correctly.
 
-### GitHub Pages (for forks)
+### Azure Static Web Apps (optional)
 
-A separate workflow deploys to GitHub Pages, ideal for forks:
+Fork owners may instead host the static frontend with Azure Static Web Apps:
 
-1. Fork this repo
-2. Go to **Settings → Pages → Source** and select **GitHub Actions**
-3. Push to `main` — the workflow at `.github/workflows/deploy-ghpages.yml`
-   builds and deploys to `https://<username>.github.io/<repo-name>/`
+1. Create a Static Web App in the Azure Portal.
+2. Connect it to your fork.
+3. Add its deployment token as
+   `AZURE_STATIC_WEB_APPS_API_TOKEN_GREEN_PLANT_0BB1D2910`.
+4. Push to `main`.
 
-The `VITE_BASE_PATH` env var is set automatically to `/<repo-name>/` during the
-GitHub Pages build so asset paths resolve correctly.
+The supplied Azure Static Web Apps workflows also publish static assets only.
+They do not deploy managed Azure Functions.
 
 ### Environment Variables
 
@@ -226,6 +224,35 @@ GitHub Pages build so asset paths resolve correctly.
 | `VITE_BASE_PATH` | `/` | Base path for the app (set automatically for GitHub Pages) |
 | `VITE_GITHUB_CLIENT_ID` | *(empty)* | GitHub OAuth App client ID for one-click catalogue PRs ([setup guide](docs/github-oauth-setup.md)) |
 | `VITE_GITHUB_OAUTH_BASE` | *(empty)* | External OAuth proxy URL for GitHub Pages deployments (e.g. Cloudflare Worker URL) |
+| `VITE_API_BASE` | `/api` | Base URL for separately deployed API routes (e.g. `https://example.azurewebsites.net/api`) |
+
+### Optional Azure Functions API
+
+The backend in `api/` uses the Azure Functions Node.js v4 programming model.
+It provides the AI ontology builder and the GitHub device-flow OAuth proxy.
+Azure Functions remains a supported opt-in hosting choice, but it is not part
+of the official GitHub Pages deployment or any repository-provided deployment
+workflow. Operators who need these features deploy the Functions app with
+their own infrastructure and configure the frontend to use that endpoint.
+
+```bash
+cp api/local.settings.json.template api/local.settings.json
+# Replace only the local placeholder values; never commit local.settings.json.
+npm --prefix api ci
+npm --prefix api run build
+npm --prefix api test
+npm --prefix api start
+```
+
+The AI builder requires `AZURE_OPENAI_ENDPOINT` and `AZURE_OPENAI_API_KEY`.
+`AZURE_OPENAI_DEPLOYMENT` defaults to `gpt-4o-mini`. Keep
+`FUNCTIONS_NODE_BLOCK_ON_ENTRY_POINT_ERROR=true` so registration failures stop
+the Functions host instead of leaving routes unavailable. For a static
+frontend, set `VITE_API_BASE` to the Function App's `/api` URL for the AI
+builder and `VITE_GITHUB_OAUTH_BASE` to its `/api/github-oauth` URL for the
+GitHub device flow. Configure the Function App to allow the frontend origin
+through CORS. Set the repository Actions variable `VITE_ENABLE_AI_BUILDER` to
+`true` when the deployed frontend should expose the AI builder.
 
 ## Project Structure
 
@@ -241,7 +268,7 @@ Ontology-Playground/
 ├── catalogue/            # Official + community ontology RDF files
 ├── content/learn/        # Course directories with markdown articles, quizzes, and metadata
 ├── scripts/              # Build-time compilers (catalogue, learning content)
-├── api/                  # Azure Functions backend (optional, for AI builder)
+├── api/                  # Azure Functions v4 backend (optional)
 ├── docs/                 # Guides and documentation
 ├── public/               # Static assets (compiled catalogue.json, learn.json)
 └── .github/workflows/    # CI/CD (Azure SWA + GitHub Pages)
