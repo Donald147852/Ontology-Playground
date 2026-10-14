@@ -9,11 +9,14 @@ permissions:
   actions: read
   contents: write
   issues: write
-  pull-requests: write
 
 jobs:
   comment:
-    if: github.repository == 'microsoft/Ontology-Playground' && github.event.workflow_run.conclusion == 'success'
+    if: >-
+      github.repository == 'microsoft/Ontology-Playground'
+      && github.event.workflow_run.conclusion == 'success'
+      && github.event.workflow_run.event == 'pull_request'
+      && github.event.workflow_run.pull_requests[0].number > 0
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -51,6 +54,11 @@ jobs:
           fi
 
       - name: Prepare preview assets and comment body
+        id: prepare
+        env:
+          EXPECTED_PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          EXPECTED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          EXPECTED_REPOSITORY: ${{ github.repository }}
         run: >-
           npx tsx scripts/prepare-ontology-preview-assets.ts
           --manifest ontology-preview-artifact/manifest.json
@@ -73,23 +81,29 @@ jobs:
 
       - name: Upsert PR preview comment
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PR_NUMBER: ${{ steps.prepare.outputs.pr_number }}
         with:
           script: |
             const fs = require('fs');
-            const manifest = JSON.parse(fs.readFileSync('ontology-preview-artifact/manifest.json', 'utf8'));
             const body = fs.readFileSync('ontology-preview-comment.md', 'utf8');
             const marker = '<!-- ontology-preview-render -->';
             const { owner, repo } = context.repo;
+            const issueNumber = Number(process.env.PR_NUMBER);
+            if (!Number.isInteger(issueNumber) || issueNumber <= 0) {
+              core.setFailed('Validated preview PR number is missing.');
+              return;
+            }
 
             const comments = await github.paginate(github.rest.issues.listComments, {
               owner,
               repo,
-              issue_number: manifest.prNumber,
+              issue_number: issueNumber,
               per_page: 100,
             });
             const existing = comments.find((comment) => comment.user?.type === 'Bot' && comment.body?.includes(marker));
             if (existing) {
               await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
             } else {
-              await github.rest.issues.createComment({ owner, repo, issue_number: manifest.prNumber, body });
+              await github.rest.issues.createComment({ owner, repo, issue_number: issueNumber, body });
             }
