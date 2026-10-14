@@ -37,6 +37,6 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: upload
           app_location: /
-          api_location: api
           output_location: build
           production_branch: main
+          # Static preview only; never publish the optional api/ package.

@@ -183,31 +183,27 @@ npm run test:watch  # watch mode
 
 ## 部署
 
-### Azure Static Web Apps（主要方式）
+### GitHub Pages（官方）
 
-存储库附带 GitHub Actions 工作流，每次推送到 `main` 时都会部署到
-Azure SWA。
+公开的 Ontology Playground 通过
+`.github/workflows/deploy-ghpages.yml` 从 `main` 部署到 GitHub Pages。
+该工作流只发布静态 `build/` 输出，不会部署可选的 `api/` 包。
+
+Fork 所有者可以修改工作流中的存储库限制，然后在
+**Settings → Pages → Source** 中选择 **GitHub Actions** 来使用 GitHub Pages。
+
+### Azure Static Web Apps（可选）
+
+Fork 所有者也可以选择使用 Azure Static Web Apps 托管静态前端：
 
 1. 在 Azure 门户中创建静态 Web 应用
-2. 连接你的 GitHub 存储库
-3. 复制部署令牌，并将其添加为 GitHub 机密
+2. 将其连接到你的 fork
+3. 将部署令牌添加为 GitHub 机密
    `AZURE_STATIC_WEB_APPS_API_TOKEN_GREEN_PLANT_0BB1D2910`
-4. 推送到 `main`——工作流
-   `.github/workflows/azure-static-web-apps-green-plant-0bb1d2910.yml` 会处理
-   其余步骤
-5. 拉取请求会自动创建 PR 预览环境
+4. 推送到 `main`
 
-### GitHub Pages（适用于 fork）
-
-另一个工作流会部署到 GitHub Pages，非常适合 fork：
-
-1. Fork 此存储库
-2. 前往 **Settings → Pages → Source**，选择 **GitHub Actions**
-3. 推送到 `main`——`.github/workflows/deploy-ghpages.yml` 工作流
-   会构建并部署到 `https://<username>.github.io/<repo-name>/`
-
-在 GitHub Pages 构建期间，`VITE_BASE_PATH` 环境变量会自动设为
-`/<repo-name>/`，确保资源路径正确解析。
+附带的 Azure Static Web Apps 工作流也只发布静态资源，不会部署托管的
+Azure Functions。Azure Functions API 是可选功能，需要它的用户可以自行部署。
 
 ### 环境变量
 
