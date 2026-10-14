@@ -839,6 +839,35 @@ export function OntologyGraph() {
   const handleLargeDepthChange = (nextDepth: number) => {
     if (nextDepth === largeDepth) return;
     preserveCurrentGraphPosition();
+    const nextView = createGraphView(currentOntology, {
+      search: largeSearch,
+      depth: nextDepth,
+    });
+    const nextEntityIds = new Set(
+      nextView.entities.map(({ id }) => id),
+    );
+    const nextRelationshipIds = new Set(
+      nextView.relationships.map(({ id }) => id),
+    );
+
+    setExpandedNodeIds(new Set());
+    if (selectedEntityId && !nextEntityIds.has(selectedEntityId)) {
+      selectEntity(null);
+    }
+    if (
+      selectedRelationshipId
+      && !nextRelationshipIds.has(selectedRelationshipId)
+    ) {
+      selectRelationship(null);
+    }
+    if (
+      highlightedEntities.some((id) => !nextEntityIds.has(id))
+      || highlightedRelationships.some(
+        (id) => !nextRelationshipIds.has(id),
+      )
+    ) {
+      clearHighlights();
+    }
     setLargeDepth(nextDepth);
   };
 

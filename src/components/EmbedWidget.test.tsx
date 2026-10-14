@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { EmbedWidget } from './EmbedWidget';
 import type { EmbedConfig } from './EmbedWidget';
@@ -381,6 +387,9 @@ describe('EmbedWidget', () => {
     render(<EmbedWidget config={config} />);
 
     await screen.findByRole('region', { name: 'Large ontology controls' });
+    const initialConfig = embedGraphMocks.cytoscape.mock.calls[0][0] as {
+      elements: unknown[];
+    };
     await user.click(screen.getByRole('button', { name: 'Hide' }));
     const nodeTapHandlers = embedGraphMocks.handlers['tap:node'];
     expect(nodeTapHandlers).toBeDefined();
@@ -414,6 +423,80 @@ describe('EmbedWidget', () => {
       'selected-node-edge',
     );
     expect(expandAction).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Open' }));
+    fireEvent.change(screen.getByRole('slider', { name: 'Detail: 1 hop' }), {
+      target: { value: '2' },
+    });
+    await waitFor(() => {
+      expect(embedGraphMocks.cytoscape).toHaveBeenCalledTimes(3);
+    });
+    fireEvent.change(screen.getByRole('slider', { name: 'Detail: 2 hops' }), {
+      target: { value: '1' },
+    });
+    await waitFor(() => {
+      expect(embedGraphMocks.cytoscape).toHaveBeenCalledTimes(4);
+    });
+
+    const collapsedConfig = embedGraphMocks.cytoscape.mock.calls[3][0] as {
+      elements: unknown[];
+    };
+    expect(collapsedConfig.elements).toHaveLength(initialConfig.elements.length);
+    expect(screen.getByRole('button', {
+      name: `Show ${hiddenNeighborCount} hidden ${
+        hiddenNeighborCount === 1 ? 'neighbor' : 'neighbors'
+      } for ${boundaryEntity?.name}`,
+    })).toBeEnabled();
+  });
+
+  it('clears a deep embed selection when lowering hierarchy detail', async () => {
+    const ontology = createLargeOntology();
+    const initialView = createGraphView(ontology, { depth: 1 });
+    const detailedView = createGraphView(ontology, { depth: 2 });
+    const initialIds = new Set(initialView.entities.map(({ id }) => id));
+    const deepEntity = detailedView.entities.find(
+      ({ id }) => !initialIds.has(id),
+    );
+    expect(deepEntity).toBeDefined();
+    const config: EmbedConfig = {
+      ontologyInline: btoa(JSON.stringify(ontology)),
+      theme: 'dark',
+      height: '400px',
+    };
+
+    render(<EmbedWidget config={config} />);
+
+    await screen.findByRole('region', { name: 'Large ontology controls' });
+    const initialConfig = embedGraphMocks.cytoscape.mock.calls[0][0] as {
+      elements: unknown[];
+    };
+    fireEvent.change(screen.getByRole('slider', { name: 'Detail: 1 hop' }), {
+      target: { value: '2' },
+    });
+    await waitFor(() => {
+      expect(embedGraphMocks.cytoscape).toHaveBeenCalledTimes(2);
+    });
+
+    const nodeTapHandlers = embedGraphMocks.handlers['tap:node'];
+    act(() => {
+      nodeTapHandlers.at(-1)?.({
+        target: { id: () => deepEntity!.id },
+      });
+    });
+    expect(await screen.findByText(deepEntity!.description)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole('slider', { name: 'Detail: 2 hops' }), {
+      target: { value: '1' },
+    });
+    await waitFor(() => {
+      expect(embedGraphMocks.cytoscape).toHaveBeenCalledTimes(3);
+    });
+
+    const collapsedConfig = embedGraphMocks.cytoscape.mock.calls[2][0] as {
+      elements: unknown[];
+    };
+    expect(collapsedConfig.elements).toHaveLength(initialConfig.elements.length);
+    expect(screen.queryByText(deepEntity!.description)).not.toBeInTheDocument();
   });
 
   it('reveals deep entities through embedded overview search', async () => {

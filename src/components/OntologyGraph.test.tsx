@@ -244,6 +244,7 @@ describe('OntologyGraph adaptive rendering', () => {
     await waitFor(() => {
       expect(graphMocks.cytoscape).toHaveBeenCalledTimes(1);
     });
+    const initialConfig = graphMocks.cytoscape.mock.calls[0][0] as CapturedConfig;
     fireEvent.click(screen.getByRole('button', { name: 'Hide' }));
 
     act(() => {
@@ -282,6 +283,69 @@ describe('OntologyGraph adaptive rendering', () => {
     expect(
       screen.getByRole('button', { name: 'Neighbors already shown' }),
     ).toBeDisabled();
+
+    fireEvent.change(screen.getByRole('slider', { name: 'Detail: 1 hop' }), {
+      target: { value: '2' },
+    });
+    await waitFor(() => {
+      expect(graphMocks.cytoscape).toHaveBeenCalledTimes(3);
+    });
+    fireEvent.change(screen.getByRole('slider', { name: 'Detail: 2 hops' }), {
+      target: { value: '1' },
+    });
+    await waitFor(() => {
+      expect(graphMocks.cytoscape).toHaveBeenCalledTimes(4);
+    });
+
+    const collapsedConfig =
+      graphMocks.cytoscape.mock.calls[3][0] as CapturedConfig;
+    expect(collapsedConfig.elements).toHaveLength(initialConfig.elements.length);
+    expect(screen.getByRole('button', {
+      name: `Show ${hiddenNeighborCount} hidden ${
+        hiddenNeighborCount === 1 ? 'neighbor' : 'neighbors'
+      } for ${boundaryName}`,
+    })).toBeEnabled();
+  });
+
+  it('clears a deep selection when lowering hierarchy detail', async () => {
+    const ontology = createLargeFixture();
+    const initialView = createGraphView(ontology, { depth: 1 });
+    const detailedView = createGraphView(ontology, { depth: 2 });
+    const initialIds = new Set(initialView.entities.map(({ id }) => id));
+    const deepEntity = detailedView.entities.find(
+      ({ id }) => !initialIds.has(id),
+    );
+    expect(deepEntity).toBeDefined();
+
+    useAppStore.getState().loadOntology(ontology);
+    render(<OntologyGraph />);
+    await waitFor(() => {
+      expect(graphMocks.cytoscape).toHaveBeenCalledTimes(1);
+    });
+    const initialConfig = graphMocks.cytoscape.mock.calls[0][0] as CapturedConfig;
+
+    fireEvent.change(screen.getByRole('slider', { name: 'Detail: 1 hop' }), {
+      target: { value: '2' },
+    });
+    await waitFor(() => {
+      expect(graphMocks.cytoscape).toHaveBeenCalledTimes(2);
+    });
+    act(() => {
+      useAppStore.getState().selectEntity(deepEntity!.id);
+    });
+    expect(graphMocks.cytoscape).toHaveBeenCalledTimes(2);
+
+    fireEvent.change(screen.getByRole('slider', { name: 'Detail: 2 hops' }), {
+      target: { value: '1' },
+    });
+    await waitFor(() => {
+      expect(graphMocks.cytoscape).toHaveBeenCalledTimes(3);
+    });
+
+    const collapsedConfig =
+      graphMocks.cytoscape.mock.calls[2][0] as CapturedConfig;
+    expect(collapsedConfig.elements).toHaveLength(initialConfig.elements.length);
+    expect(useAppStore.getState().selectedEntityId).toBeNull();
   });
 
   it('reveals a hidden entity selected from another navigation surface', async () => {

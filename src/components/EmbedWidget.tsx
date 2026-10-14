@@ -619,6 +619,26 @@ function EmbedGraph({ ontology, theme, selected, setSelected }: EmbedGraphProps)
     pendingPositionSnapshotRef.current = cyRef.current
       ? captureGraphPositionSnapshot(cyRef.current)
       : null;
+    const nextView = createGraphView(ontology, {
+      search,
+      depth: nextDepth,
+    });
+
+    setExpandedNodeIds(new Set());
+    if (
+      (
+        selected?.entity
+        && !nextView.entities.some(({ id }) => id === selected.entity?.id)
+      )
+      || (
+        selected?.relationship
+        && !nextView.relationships.some(
+          ({ id }) => id === selected.relationship?.id,
+        )
+      )
+    ) {
+      setSelected(null);
+    }
     setDepth(nextDepth);
   };
 
