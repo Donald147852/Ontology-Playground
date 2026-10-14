@@ -220,6 +220,10 @@ describe('EmbedWidget', () => {
     expect(controls).toHaveTextContent('Semantic overview');
     expect(controls).toHaveTextContent(/of 350 entities/);
     expect(controls).toHaveTextContent(/of 349 relationships/);
+    const detailSlider = screen.getByRole('slider', { name: 'Detail: 1 hop' });
+    expect(detailSlider).toHaveValue('1');
+    expect(Number(detailSlider.getAttribute('max'))).toBeGreaterThan(1);
+    expect(screen.getByRole('button', { name: 'Reset view' })).toBeDisabled();
   });
 
   it('reveals deep entities through embedded overview search', async () => {

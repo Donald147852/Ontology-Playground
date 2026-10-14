@@ -8,6 +8,8 @@ interface LargeGraphControlsProps {
   searchInput: string;
   appliedSearch: string;
   depth: number;
+  maxDepth: number;
+  canReset: boolean;
   onSearchInputChange: (value: string) => void;
   onSearch: () => void;
   onDepthChange: (depth: number) => void;
@@ -21,6 +23,8 @@ export function LargeGraphControls({
   searchInput,
   appliedSearch,
   depth,
+  maxDepth,
+  canReset,
   onSearchInputChange,
   onSearch,
   onDepthChange,
@@ -41,7 +45,7 @@ export function LargeGraphControls({
       <div className="large-graph-header">
         <div>
           <div className="large-graph-title">Semantic overview</div>
-          <div className="large-graph-tier">Massive ontology mode</div>
+          <div className="large-graph-tier">Focused hierarchy view</div>
         </div>
         <button
           type="button"
@@ -77,18 +81,31 @@ export function LargeGraphControls({
           </form>
 
           <div className="large-graph-options">
-            <label htmlFor="large-graph-depth">Detail</label>
-            <select
+            <label htmlFor="large-graph-depth">
+              Detail: <strong>{depth} {depth === 1 ? 'hop' : 'hops'}</strong>
+              <span className="large-graph-depth-max">
+                {' '}· max {maxDepth}
+              </span>
+            </label>
+            <input
               id="large-graph-depth"
+              type="range"
+              min={1}
+              max={maxDepth}
+              step={1}
               value={depth}
+              disabled={maxDepth <= 1}
               onChange={(event) => onDepthChange(Number(event.target.value))}
+              aria-label={`Detail: ${depth} ${depth === 1 ? 'hop' : 'hops'}`}
+              aria-valuetext={`${depth} ${depth === 1 ? 'hop' : 'hops'}`}
+            />
+            <button
+              type="button"
+              disabled={!canReset}
+              onClick={onShowOverview}
             >
-              <option value={1}>1 hop</option>
-              <option value={2}>2 hops</option>
-              <option value={3}>3 hops</option>
-              <option value={4}>4 hops</option>
-            </select>
-            <button type="button" onClick={onShowOverview}>Overview</button>
+              Reset view
+            </button>
           </div>
 
           {appliedSearch && graphView.searchMatchCount > 0 && (

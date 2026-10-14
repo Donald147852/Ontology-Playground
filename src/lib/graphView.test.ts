@@ -5,6 +5,7 @@ import {
   createGraphView,
   DEFAULT_OVERVIEW_NODE_LIMIT,
   graphScaleTier,
+  graphViewMaxDepth,
   MAX_RENDERED_EDGES,
   MAX_RENDERED_NODES,
 } from './graphView';
@@ -102,6 +103,18 @@ describe('adaptive graph views', () => {
 
     expect(view.rootIds).toContain('node-0');
     expect(view.entities.some((entity) => entity.id === 'node-0')).toBe(true);
+  });
+
+  it('adapts the useful hop limit to ontology depth and render budget', () => {
+    const ontology = createTreeOntology(1_518, 1_736);
+    const maxDepth = graphViewMaxDepth(ontology);
+    const atMax = createGraphView(ontology, { depth: maxDepth });
+    const beyondMax = createGraphView(ontology, { depth: maxDepth + 10 });
+
+    expect(maxDepth).toBeGreaterThan(1);
+    expect(atMax.visibleNodeCount).toBe(MAX_RENDERED_NODES);
+    expect(beyondMax.visibleNodeCount).toBe(atMax.visibleNodeCount);
+    expect(beyondMax.visibleEdgeCount).toBe(atMax.visibleEdgeCount);
   });
 
   it('ranks exact search matches and opens their neighborhood', () => {

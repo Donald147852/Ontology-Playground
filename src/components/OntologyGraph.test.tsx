@@ -121,6 +121,19 @@ describe('OntologyGraph adaptive rendering', () => {
       MAX_RENDERED_NODES + MAX_RENDERED_EDGES,
     );
     expect(config.elements.length).toBeLessThan(350 + 349);
+
+    const resetView = screen.getByRole('button', { name: 'Reset view' });
+    const detailSlider = screen.getByRole('slider', { name: 'Detail: 1 hop' });
+    expect(resetView).toBeDisabled();
+    expect(Number(detailSlider.getAttribute('max'))).toBeGreaterThan(1);
+    fireEvent.change(detailSlider, {
+      target: { value: '2' },
+    });
+    await waitFor(() => {
+      expect(graphMocks.cytoscape).toHaveBeenCalledTimes(2);
+    });
+    expect(screen.getByRole('slider', { name: 'Detail: 2 hops' })).toHaveValue('2');
+    expect(resetView).toBeEnabled();
   });
 
   it('reveals a hidden entity selected from another navigation surface', async () => {
@@ -144,7 +157,7 @@ describe('OntologyGraph adaptive rendering', () => {
       }),
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Overview' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reset view' }));
     await waitFor(() => {
       expect(graphMocks.cytoscape).toHaveBeenCalledTimes(3);
     });

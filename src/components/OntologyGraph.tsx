@@ -8,6 +8,7 @@ import {
   BOUNDED_LABEL_ZOOM_THRESHOLD,
   createGraphView,
   DEFAULT_LARGE_GRAPH_DEPTH,
+  graphViewMaxDepth,
   type GraphViewMode,
 } from '../lib/graphView';
 import { LargeGraphControls } from './LargeGraphControls';
@@ -22,6 +23,10 @@ declare global {
 }
 
 type GraphColors = { nodeText: string; edgeColor: string; edgeText: string; edgeLabelBg: string };
+
+const MIN_GRAPH_ZOOM = 0.3;
+const MAX_GRAPH_ZOOM = 3;
+const GRAPH_ZOOM_STEP = 0.3;
 
 function graphLayoutOptions(
   mode: GraphViewMode,
@@ -91,6 +96,7 @@ export function OntologyGraph() {
   const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(
     () => new Set(),
   );
+  const [graphZoom, setGraphZoom] = useState(MIN_GRAPH_ZOOM);
   
   // Helper to safely get cytoscape instance - returns null if destroyed
   const getCy = useCallback(() => {
@@ -146,6 +152,10 @@ export function OntologyGraph() {
     ],
   );
   const isBoundedView = graphView.mode === 'bounded';
+  const maxLargeDepth = useMemo(
+    () => graphViewMaxDepth(currentOntology),
+    [currentOntology],
+  );
   const graphRootIds = useMemo(() => {
     const visibleIds = new Set(graphView.entities.map((entity) => entity.id));
     const visibleRootIds = graphView.rootIds.filter((id) => visibleIds.has(id));
@@ -382,8 +392,8 @@ export function OntologyGraph() {
       ],
        
       layout: graphLayoutOptions(graphView.mode, graphRootIds),
-      minZoom: 0.3,
-      maxZoom: 3
+      minZoom: MIN_GRAPH_ZOOM,
+      maxZoom: MAX_GRAPH_ZOOM
     });
 
     let boundedLabelsHidden: boolean | null = null;
@@ -395,8 +405,12 @@ export function OntologyGraph() {
       cy.nodes('[isRoot = 0][hiddenNeighborCount = 0]')
         .toggleClass('overview-label-hidden', shouldHide);
     };
-    cy.on('zoom', syncBoundedLabels);
-    syncBoundedLabels();
+    const syncZoomState = () => {
+      syncBoundedLabels();
+      setGraphZoom(cy.zoom());
+    };
+    cy.on('zoom', syncZoomState);
+    syncZoomState();
 
     // Event handlers
     cy.on('tap', 'node', (evt: EventObject) => {
@@ -609,24 +623,30 @@ export function OntologyGraph() {
   }, [highlightedEntities, highlightedRelationships, themeColors, getCy]);
 
   // Graph controls
-  const handleZoomIn = () => {
+  const changeZoom = (delta: number) => {
     const cy = getCy();
-    if (cy) {
-      try {
-        cy.zoom(cy.zoom() * 1.3);
-        cy.center();
-      } catch { /* ignore */ }
-    }
+    if (!cy) return;
+    try {
+      const nextZoom = Math.min(
+        MAX_GRAPH_ZOOM,
+        Math.max(MIN_GRAPH_ZOOM, cy.zoom() + delta),
+      );
+      cy.zoom({
+        level: Number(nextZoom.toFixed(2)),
+        renderedPosition: {
+          x: cy.width() / 2,
+          y: cy.height() / 2,
+        },
+      });
+    } catch { /* ignore */ }
+  };
+
+  const handleZoomIn = () => {
+    changeZoom(GRAPH_ZOOM_STEP);
   };
 
   const handleZoomOut = () => {
-    const cy = getCy();
-    if (cy) {
-      try {
-        cy.zoom(cy.zoom() / 1.3);
-        cy.center();
-      } catch { /* ignore */ }
-    }
+    changeZoom(-GRAPH_ZOOM_STEP);
   };
 
   const handleFit = () => {
@@ -688,6 +708,15 @@ export function OntologyGraph() {
   const legendLimit = isBoundedView ? 8 : 100;
   const legendEntities = graphView.entities.slice(0, legendLimit);
   const hiddenLegendCount = graphView.entities.length - legendEntities.length;
+  const canResetLargeView = (
+    largeSearch !== ''
+    || largeDepth !== DEFAULT_LARGE_GRAPH_DEPTH
+    || expandedNodeIds.size > 0
+    || selectedEntityId !== null
+    || selectedRelationshipId !== null
+    || highlightedEntities.length > 0
+    || highlightedRelationships.length > 0
+  );
 
   return (
     <div className="graph-container">
@@ -701,6 +730,8 @@ export function OntologyGraph() {
           searchInput={largeSearchInput}
           appliedSearch={largeSearch}
           depth={largeDepth}
+          maxDepth={maxLargeDepth}
+          canReset={canResetLargeView}
           onSearchInputChange={setLargeSearchInput}
           onSearch={handleLargeSearch}
           onDepthChange={setLargeDepth}
@@ -726,10 +757,20 @@ export function OntologyGraph() {
       )}
       
       <div className="graph-controls">
-        <button className="graph-control-btn" onClick={handleZoomIn} title="Zoom In">
+        <button
+          className="graph-control-btn"
+          onClick={handleZoomIn}
+          title="Zoom In"
+          disabled={graphZoom >= MAX_GRAPH_ZOOM - 0.001}
+        >
           <ZoomIn size={18} />
         </button>
-        <button className="graph-control-btn" onClick={handleZoomOut} title="Zoom Out">
+        <button
+          className="graph-control-btn"
+          onClick={handleZoomOut}
+          title="Zoom Out"
+          disabled={graphZoom <= MIN_GRAPH_ZOOM + 0.001}
+        >
           <ZoomOut size={18} />
         </button>
         <button className="graph-control-btn" onClick={handleFit} title="Fit to View">

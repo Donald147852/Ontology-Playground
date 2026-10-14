@@ -14,7 +14,6 @@ export const MAX_RENDERED_NODES = 180;
 export const MAX_RENDERED_EDGES = 360;
 export const DEFAULT_OVERVIEW_NODE_LIMIT = 60;
 export const DEFAULT_LARGE_GRAPH_DEPTH = 1;
-export const MAX_LARGE_GRAPH_DEPTH = 4;
 export const BOUNDED_LABEL_ZOOM_THRESHOLD = 1.8;
 
 const MAX_ROOT_SEEDS = 24;
@@ -167,6 +166,79 @@ function buildHierarchyChildren(
   return children;
 }
 
+interface GraphTopology {
+  entityIds: Set<string>;
+  validRelationships: Relationship[];
+  rootIds: string[];
+  adjacency: Map<string, Set<string>>;
+  hierarchyChildren: Map<string, Set<string>>;
+}
+
+function buildGraphTopology(ontology: Ontology): GraphTopology {
+  const entityIds = new Set(ontology.entityTypes.map((entity) => entity.id));
+  const validRelationships = ontology.relationships.filter(
+    (relationship) => (
+      entityIds.has(relationship.from) && entityIds.has(relationship.to)
+    ),
+  );
+  const hierarchyRelationships = validRelationships.filter(
+    isHierarchyRelationship,
+  );
+  const rootIds = findRootIds(
+    [...entityIds],
+    hierarchyRelationships.length > 0
+      ? hierarchyRelationships
+      : validRelationships,
+  );
+  const adjacency = buildUndirectedAdjacency(entityIds, validRelationships);
+  const hierarchyChildren = hierarchyRelationships.length > 0
+    ? buildHierarchyChildren(entityIds, hierarchyRelationships)
+    : adjacency;
+
+  return {
+    entityIds,
+    validRelationships,
+    rootIds,
+    adjacency,
+    hierarchyChildren,
+  };
+}
+
+function maxUsefulDepth(
+  rootIds: readonly string[],
+  hierarchyChildren: ReadonlyMap<string, ReadonlySet<string>>,
+): number {
+  const seen = new Set(rootIds.slice(0, MAX_RENDERED_NODES));
+  let frontier = [...seen];
+  let depth = 0;
+
+  while (frontier.length > 0 && seen.size < MAX_RENDERED_NODES) {
+    const next: string[] = [];
+    for (const id of frontier) {
+      for (const childId of hierarchyChildren.get(id) ?? []) {
+        if (seen.has(childId)) continue;
+        seen.add(childId);
+        next.push(childId);
+        if (seen.size >= MAX_RENDERED_NODES) break;
+      }
+      if (seen.size >= MAX_RENDERED_NODES) break;
+    }
+    if (next.length === 0) break;
+    depth += 1;
+    frontier = next;
+  }
+
+  return Math.max(DEFAULT_LARGE_GRAPH_DEPTH, depth);
+}
+
+export function graphViewMaxDepth(ontology: Ontology): number {
+  if (graphScaleTier(ontology) !== 'massive') {
+    return DEFAULT_LARGE_GRAPH_DEPTH;
+  }
+  const { rootIds, hierarchyChildren } = buildGraphTopology(ontology);
+  return maxUsefulDepth(rootIds, hierarchyChildren);
+}
+
 function addNeighborhood(
   selectedIds: Set<string>,
   adjacency: ReadonlyMap<string, ReadonlySet<string>>,
@@ -257,25 +329,13 @@ export function createGraphView(
     return completeView(ontology, tier);
   }
 
-  const entityIds = new Set(ontology.entityTypes.map((entity) => entity.id));
-  const validRelationships = ontology.relationships.filter(
-    (relationship) => (
-      entityIds.has(relationship.from) && entityIds.has(relationship.to)
-    ),
-  );
-  const hierarchyRelationships = validRelationships.filter(
-    isHierarchyRelationship,
-  );
-  const rootIds = findRootIds(
-    [...entityIds],
-    hierarchyRelationships.length > 0
-      ? hierarchyRelationships
-      : validRelationships,
-  );
-  const adjacency = buildUndirectedAdjacency(entityIds, validRelationships);
-  const hierarchyChildren = hierarchyRelationships.length > 0
-    ? buildHierarchyChildren(entityIds, hierarchyRelationships)
-    : adjacency;
+  const {
+    entityIds,
+    validRelationships,
+    rootIds,
+    adjacency,
+    hierarchyChildren,
+  } = buildGraphTopology(ontology);
   const searchMatches = matchingEntities(
     ontology.entityTypes,
     options.search ?? '',
@@ -284,8 +344,11 @@ export function createGraphView(
     ? searchMatches.slice(0, MAX_SEARCH_SEEDS).map((entity) => entity.id)
     : rootIds;
   const depth = Math.min(
-    MAX_LARGE_GRAPH_DEPTH,
-    Math.max(0, Math.floor(options.depth ?? DEFAULT_LARGE_GRAPH_DEPTH)),
+    maxUsefulDepth(rootIds, hierarchyChildren),
+    Math.max(
+      DEFAULT_LARGE_GRAPH_DEPTH,
+      Math.floor(options.depth ?? DEFAULT_LARGE_GRAPH_DEPTH),
+    ),
   );
   const expandedNodeIds = new Set(
     [...(options.expandedNodeIds ?? [])].filter((id) => entityIds.has(id)),

@@ -21,6 +21,7 @@ import {
   BOUNDED_LABEL_ZOOM_THRESHOLD,
   createGraphView,
   DEFAULT_LARGE_GRAPH_DEPTH,
+  graphViewMaxDepth,
   type GraphView,
 } from '../lib/graphView';
 import type { Catalogue } from '../types/catalogue';
@@ -268,7 +269,7 @@ interface EmbedGraphProps {
   setSelected: (s: SelectedItem | null) => void;
 }
 
-function EmbedGraph({ ontology, theme, setSelected }: EmbedGraphProps) {
+function EmbedGraph({ ontology, theme, selected, setSelected }: EmbedGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
   const [searchInput, setSearchInput] = useState('');
@@ -281,6 +282,7 @@ function EmbedGraph({ ontology, theme, setSelected }: EmbedGraphProps) {
     () => createGraphView(ontology, { search, depth, expandedNodeIds }),
     [depth, expandedNodeIds, ontology, search],
   );
+  const maxDepth = useMemo(() => graphViewMaxDepth(ontology), [ontology]);
   const graphOntologyRef = useRef(ontology);
 
   useEffect(() => {
@@ -533,6 +535,13 @@ function EmbedGraph({ ontology, theme, setSelected }: EmbedGraphProps) {
           searchInput={searchInput}
           appliedSearch={search}
           depth={depth}
+          maxDepth={maxDepth}
+          canReset={(
+            search !== ''
+            || depth !== DEFAULT_LARGE_GRAPH_DEPTH
+            || expandedNodeIds.size > 0
+            || selected !== null
+          )}
           theme={theme}
           onSearchInputChange={setSearchInput}
           onSearch={handleSearch}
@@ -551,6 +560,8 @@ interface EmbedLargeGraphControlsProps {
   searchInput: string;
   appliedSearch: string;
   depth: number;
+  maxDepth: number;
+  canReset: boolean;
   theme: ThemeTokens;
   onSearchInputChange: (value: string) => void;
   onSearch: () => void;
@@ -565,6 +576,8 @@ function EmbedLargeGraphControls({
   searchInput,
   appliedSearch,
   depth,
+  maxDepth,
+  canReset,
   theme,
   onSearchInputChange,
   onSearch,
@@ -648,21 +661,35 @@ function EmbedLargeGraphControls({
           </form>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
             <label htmlFor="embed-graph-depth" style={{ color: theme.textSecondary }}>
-              Detail
+              Detail: <strong>{depth} {depth === 1 ? 'hop' : 'hops'}</strong>
+              <span style={{ color: theme.textTertiary }}>
+                {' '}· max {maxDepth}
+              </span>
             </label>
-            <select
+            <input
               id="embed-graph-depth"
+              type="range"
+              min={1}
+              max={maxDepth}
+              step={1}
               value={depth}
+              disabled={maxDepth <= 1}
               onChange={(event) => onDepthChange(Number(event.target.value))}
-              style={inputStyle}
+              aria-label={`Detail: ${depth} ${depth === 1 ? 'hop' : 'hops'}`}
+              aria-valuetext={`${depth} ${depth === 1 ? 'hop' : 'hops'}`}
+              style={{ flex: 1, accentColor: theme.accent }}
+            />
+            <button
+              type="button"
+              disabled={!canReset}
+              style={{
+                ...buttonStyle,
+                marginLeft: 'auto',
+                ...(!canReset ? { cursor: 'not-allowed', opacity: 0.5 } : {}),
+              }}
+              onClick={onOverview}
             >
-              <option value={1}>1 hop</option>
-              <option value={2}>2 hops</option>
-              <option value={3}>3 hops</option>
-              <option value={4}>4 hops</option>
-            </select>
-            <button type="button" style={{ ...buttonStyle, marginLeft: 'auto' }} onClick={onOverview}>
-              Overview
+              Reset view
             </button>
           </div>
           {appliedSearch && (
