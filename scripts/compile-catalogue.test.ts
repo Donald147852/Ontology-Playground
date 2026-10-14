@@ -17,6 +17,9 @@ interface CatalogueTestEntry {
   tags: string[];
   author: string;
   source: 'official' | 'community' | 'external';
+  license?: string;
+  sourceUrl?: string;
+  version?: string;
   ontology: {
     entityTypes: { name: string; properties: { isIdentifier?: boolean }[] }[];
     relationships: unknown[];
@@ -102,6 +105,34 @@ describe('catalogue metadata validation', () => {
       expect(entry.id).toMatch(/^(official|community|external)\//);
       expect(entry.id).not.toContain('\\');
     }
+  });
+
+  it('preserves external and community attribution metadata', () => {
+    const externalEntries = readCatalogue().entries.filter(
+      (entry) => entry.source === 'external',
+    );
+
+    expect(externalEntries.length).toBeGreaterThan(0);
+    for (const entry of externalEntries) {
+      expect(entry.license).toBeTruthy();
+      expect(entry.sourceUrl).toMatch(/^https:\/\//);
+    }
+
+    const brick = findEntry('external/brick-schema/brick');
+    expect(brick.license).toBe('BSD-3-Clause');
+    expect(brick.sourceUrl).toBe('https://github.com/BrickSchema/Brick/tree/v1.4.4');
+    expect(brick.version).toBe('1.4.4');
+
+    const fibo = findEntry('external/fibo/geographic-hierarchy');
+    expect(fibo.license).toBe('MIT');
+    expect(fibo.sourceUrl).toBe('https://github.com/edmcouncil/fibo');
+
+    const openIm = findEntry('community/antikas/openim');
+    expect(openIm.license).toBe('MIT');
+    expect(openIm.sourceUrl).toBe(
+      'https://github.com/antikas/open-investment-model/tree/v0.2.1',
+    );
+    expect(openIm.version).toBe('0.2.1');
   });
 
   it('community entries use username and slug path ids', () => {
