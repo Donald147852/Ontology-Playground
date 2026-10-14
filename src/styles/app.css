@@ -850,12 +850,14 @@ body {
   border-color: var(--ms-blue);
 }
 
-.large-graph-options button:disabled {
+.large-graph-options button:disabled,
+.large-graph-selection-action button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-.large-graph-options button:disabled:hover {
+.large-graph-options button:disabled:hover,
+.large-graph-selection-action button:disabled:hover {
   background: var(--bg-secondary);
   color: var(--text-primary);
   border-color: var(--border-color);
@@ -973,9 +975,8 @@ body {
   min-height: 36px;
 }
 
-.large-graph-selection-action p {
-  margin: 0;
-  color: var(--text-secondary);
+.large-graph-selection-action button:disabled {
+  opacity: 0.72;
 }
 
 .graph-legend {

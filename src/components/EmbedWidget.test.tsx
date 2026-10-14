@@ -230,6 +230,11 @@ describe('EmbedWidget', () => {
     });
     expect(Number(detailSlider.getAttribute('max'))).toBeGreaterThan(1);
     expect(screen.getByRole('button', { name: 'Reset view' })).toBeDisabled();
+    expect(
+      screen.getByRole('button', {
+        name: 'Select a +N entity to show neighbors',
+      }),
+    ).toBeDisabled();
   });
 
   it('reveals deep entities through embedded overview search', async () => {

@@ -477,6 +477,16 @@ function EmbedGraph({ ontology, theme, selected, setSelected }: EmbedGraphProps)
           style: { 'line-style': 'dashed' },
         },
         {
+          selector: 'edge.hovered',
+          style: {
+            label: 'data(label)',
+            width: 3,
+            color: theme.accent,
+            'line-color': theme.accent,
+            'target-arrow-color': theme.accent,
+          },
+        },
+        {
           selector: 'edge:selected',
           style: {
             width: 4,
@@ -528,6 +538,14 @@ function EmbedGraph({ ontology, theme, selected, setSelected }: EmbedGraphProps)
       if (relationship) {
         setSelected({ type: 'relationship', relationship });
       }
+    });
+
+    cy.on('mouseover', 'edge', (evt: EventObject) => {
+      evt.target.addClass('hovered');
+    });
+
+    cy.on('mouseout', 'edge', (evt: EventObject) => {
+      evt.target.removeClass('hovered');
     });
 
     cy.on('tap', (evt: EventObject) => {
@@ -806,39 +824,49 @@ function EmbedLargeGraphControls({
               }}
             />
           </div>
-          {selectedEntity && (
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              minHeight: 44,
-              marginTop: 8,
-            }}>
-              {selectedEntity.hiddenNeighborCount > 0
-                && !selectedEntity.isExpanded ? (
-                  <button
-                    type="button"
-                    aria-label={`Show ${selectedEntity.hiddenNeighborCount} hidden ${
-                      selectedEntity.hiddenNeighborCount === 1
-                        ? 'neighbor'
-                        : 'neighbors'
-                    } for ${selectedEntity.name}`}
-                    style={{ ...buttonStyle, width: '100%' }}
-                    onClick={onExpandSelectedEntity}
-                  >
-                    Show {selectedEntity.hiddenNeighborCount.toLocaleString()}{' '}
-                    hidden {selectedEntity.hiddenNeighborCount === 1
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            minHeight: 44,
+            marginTop: 8,
+          }}>
+            {selectedEntity
+              && selectedEntity.hiddenNeighborCount > 0
+              && !selectedEntity.isExpanded ? (
+                <button
+                  type="button"
+                  aria-label={`Show ${selectedEntity.hiddenNeighborCount} hidden ${
+                    selectedEntity.hiddenNeighborCount === 1
                       ? 'neighbor'
-                      : 'neighbors'}
-                  </button>
-                ) : (
-                  <div style={{ color: theme.textSecondary }}>
-                    {selectedEntity.isExpanded
-                      ? 'This entity is already expanded.'
-                      : 'All of this entity’s neighbors are visible.'}
-                  </div>
-                )}
-            </div>
-          )}
+                      : 'neighbors'
+                  } for ${selectedEntity.name}`}
+                  style={{ ...buttonStyle, width: '100%' }}
+                  onClick={onExpandSelectedEntity}
+                >
+                  Show {selectedEntity.hiddenNeighborCount.toLocaleString()}{' '}
+                  hidden {selectedEntity.hiddenNeighborCount === 1
+                    ? 'neighbor'
+                    : 'neighbors'}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled
+                  style={{
+                    ...buttonStyle,
+                    width: '100%',
+                    cursor: 'not-allowed',
+                    opacity: 0.65,
+                  }}
+                >
+                  {!selectedEntity
+                    ? 'Select a +N entity to show neighbors'
+                    : selectedEntity.isExpanded
+                      ? 'Neighbors already shown'
+                      : 'No hidden neighbors for this entity'}
+                </button>
+              )}
+          </div>
           {appliedSearch && (
             <div
               role={graphView.searchMatchCount === 0 ? 'alert' : 'status'}
@@ -855,8 +883,8 @@ function EmbedLargeGraphControls({
             </div>
           )}
           <div style={{ marginTop: 8, color: theme.textTertiary, lineHeight: 1.35 }}>
-            Dashed “+N” entities have hidden neighbors. Select one, then use
-            {' '}Show neighbors to expand it without losing your place.
+            Select a dashed “+N” entity to enable Show neighbors above. Hover
+            {' '}over or select a relationship to show its name.
           </div>
         </>
       )}

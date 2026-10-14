@@ -118,33 +118,34 @@ export function LargeGraphControls({
             />
           </div>
 
-          {selectedEntity && (
-            <div className="large-graph-selection-action">
-              {selectedEntity.hiddenNeighborCount > 0
-                && !selectedEntity.isExpanded ? (
-                  <button
-                    type="button"
-                    aria-label={`Show ${selectedEntity.hiddenNeighborCount} hidden ${
-                      selectedEntity.hiddenNeighborCount === 1
-                        ? 'neighbor'
-                        : 'neighbors'
-                    } for ${selectedEntity.name}`}
-                    onClick={onExpandSelectedEntity}
-                  >
-                    Show {selectedEntity.hiddenNeighborCount.toLocaleString()}{' '}
-                    hidden {selectedEntity.hiddenNeighborCount === 1
+          <div className="large-graph-selection-action">
+            {selectedEntity
+              && selectedEntity.hiddenNeighborCount > 0
+              && !selectedEntity.isExpanded ? (
+                <button
+                  type="button"
+                  aria-label={`Show ${selectedEntity.hiddenNeighborCount} hidden ${
+                    selectedEntity.hiddenNeighborCount === 1
                       ? 'neighbor'
-                      : 'neighbors'}
-                  </button>
-                ) : (
-                  <p>
-                    {selectedEntity.isExpanded
-                      ? 'This entity is already expanded.'
-                      : 'All of this entity’s neighbors are visible.'}
-                  </p>
-                )}
-            </div>
-          )}
+                      : 'neighbors'
+                  } for ${selectedEntity.name}`}
+                  onClick={onExpandSelectedEntity}
+                >
+                  Show {selectedEntity.hiddenNeighborCount.toLocaleString()}{' '}
+                  hidden {selectedEntity.hiddenNeighborCount === 1
+                    ? 'neighbor'
+                    : 'neighbors'}
+                </button>
+              ) : (
+                <button type="button" disabled>
+                  {!selectedEntity
+                    ? 'Select a +N entity to show neighbors'
+                    : selectedEntity.isExpanded
+                      ? 'Neighbors already shown'
+                      : 'No hidden neighbors for this entity'}
+                </button>
+              )}
+          </div>
 
           {appliedSearch && (
             <div className="large-graph-status" aria-live="polite">
@@ -161,8 +162,8 @@ export function LargeGraphControls({
             </div>
           )}
           <p className="large-graph-hint">
-            Dashed “+N” entities have hidden neighbors. Select one, then use
-            Show neighbors to expand it without losing your place.
+            Select a dashed “+N” entity to enable Show neighbors above. Hover
+            over or select a relationship to show its name.
           </p>
         </>
       )}

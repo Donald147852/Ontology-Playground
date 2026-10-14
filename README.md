@@ -57,8 +57,12 @@ graduates automatically with ontology size: small ontologies remain complete,
 dense ontologies retain all data with reduced label noise, and massive
 ontologies open as a bounded semantic hierarchy overview. Search, adjustable
 hop depth, and `+N` boundary expansion keep every hidden entity reachable
-without drawing the entire ontology at once. Turtle input is not currently
-supported.
+without drawing the entire ontology at once. Selecting an entity does not move
+the graph; explicit neighbor expansion keeps existing entities and the
+viewport anchored while placing newly revealed hierarchy branches to avoid
+crossings where possible. Repeated relationship labels stay out of the
+overview until the relationship is hovered or selected. Turtle input is not
+currently supported.
 
 ### One-Click Catalogue PR
 

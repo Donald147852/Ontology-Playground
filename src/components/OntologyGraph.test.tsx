@@ -81,6 +81,10 @@ function createLargeFixture(): Ontology {
 interface CapturedConfig {
   elements: Array<{ data: { id: string } }>;
   layout: { name: string; quality?: string };
+  style: Array<{
+    selector: string;
+    style: Record<string, unknown>;
+  }>;
 }
 
 describe('OntologyGraph adaptive rendering', () => {
@@ -123,12 +127,31 @@ describe('OntologyGraph adaptive rendering', () => {
       MAX_RENDERED_NODES + MAX_RENDERED_EDGES,
     );
     expect(config.elements.length).toBeLessThan(350 + 349);
+    expect(config.style).toContainEqual(expect.objectContaining({
+      selector: 'edge.hovered',
+      style: expect.objectContaining({ label: 'data(label)' }),
+    }));
+    expect(graphMocks.cy.on).toHaveBeenCalledWith(
+      'mouseover',
+      'edge',
+      expect.any(Function),
+    );
+    expect(graphMocks.cy.on).toHaveBeenCalledWith(
+      'mouseout',
+      'edge',
+      expect.any(Function),
+    );
 
     const resetView = screen.getByRole('button', { name: 'Reset view' });
     const detailSlider = screen.getByRole('slider', { name: 'Detail: 1 hop' });
     expect(detailSlider.parentElement).toHaveClass('large-graph-options');
     expect(detailSlider.previousElementSibling).toHaveClass('large-graph-detail-header');
     expect(resetView).toBeDisabled();
+    expect(
+      screen.getByRole('button', {
+        name: 'Select a +N entity to show neighbors',
+      }),
+    ).toBeDisabled();
     expect(Number(detailSlider.getAttribute('max'))).toBeGreaterThan(1);
     fireEvent.change(detailSlider, {
       target: { value: '2' },
@@ -169,8 +192,8 @@ describe('OntologyGraph adaptive rendering', () => {
       expect(graphMocks.cytoscape).toHaveBeenCalledTimes(2);
     });
     expect(
-      screen.getByText('This entity is already expanded.'),
-    ).toBeInTheDocument();
+      screen.getByRole('button', { name: 'Neighbors already shown' }),
+    ).toBeDisabled();
   });
 
   it('reveals a hidden entity selected from another navigation surface', async () => {

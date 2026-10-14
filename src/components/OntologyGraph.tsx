@@ -489,6 +489,16 @@ export function OntologyGraph() {
             'line-style': 'dashed',
           }
         },
+        {
+          selector: 'edge.hovered',
+          style: {
+            'label': 'data(label)',
+            'width': 4,
+            'color': '#0078D4',
+            'line-color': '#0078D4',
+            'target-arrow-color': '#0078D4',
+          }
+        },
         // Selected edge
         {
           selector: 'edge:selected',
@@ -577,6 +587,14 @@ export function OntologyGraph() {
           advanceQuestStepRef.current();
         }
       }
+    });
+
+    cy.on('mouseover', 'edge', (evt: EventObject) => {
+      evt.target.addClass('hovered');
+    });
+
+    cy.on('mouseout', 'edge', (evt: EventObject) => {
+      evt.target.removeClass('hovered');
     });
 
     cy.on('tap', (evt: EventObject) => {
