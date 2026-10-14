@@ -252,8 +252,6 @@ Ontology-Playground/
 |-------|-------------|
 | [オントロジー作成ガイド](docs/authoring-guide.md) | Playground で適切に動作するオントロジーの作り方 — フィールド別リファレンス、ベストプラクティス、手順解説 |
 | [オントロジーを提供：設計から GitHub まで](docs/contributing-ontology-from-design-to-github.md) | エンドツーエンドのコントリビューション手順：設計、RDF エクスポート、メタデータ、ローカル検証、プルリクエスト |
-| [Playground 機能デモガイド](docs/playground-features-demo-guide.md) | Playground の主要機能を紹介し、Fabric IQ と Real-Time Intelligence に関連づける手順別デモスクリプト |
-| [オントロジースクールのデモガイド](docs/ontology-school-demo-guide.md) | コース、埋め込み、クイズ、プレゼンテーションモード、学習ワークフローのライブデモ計画 |
 | [埋め込みガイド](docs/embed-guide.md) | 任意の Web ページへインタラクティブなオントロジーウィジェットを埋め込む方法 |
 | [GitHub OAuth セットアップ](docs/github-oauth-setup.md) | ワンクリックのカタログ PR 用に GitHub OAuth を設定する方法 |
 | [埋め込みのセキュリティ](docs/embed-security.md) | 埋め込みウィジェットのセキュリティモデル |

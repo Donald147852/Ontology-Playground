@@ -248,8 +248,6 @@ Ontology-Playground/
 |-------|-------------|
 | [本体编写指南](docs/authoring-guide.md) | 如何创建适用于 Playground 的本体——逐字段参考、最佳实践和分步演练 |
 | [贡献本体：从设计到 GitHub](docs/contributing-ontology-from-design-to-github.md) | 端到端贡献流程：设计、RDF 导出、元数据、本地验证和拉取请求 |
-| [Playground 功能演示指南](docs/playground-features-demo-guide.md) | 展示 Playground 主要功能，并将其与 Fabric IQ 和 Real-Time Intelligence 联系起来的分步演示脚本 |
-| [本体学校演示指南](docs/ontology-school-demo-guide.md) | 针对课程、嵌入、测验、演示模式和学习工作流的分步现场演示计划 |
 | [嵌入指南](docs/embed-guide.md) | 如何在任意网页中嵌入交互式本体小组件 |
 | [GitHub OAuth 设置](docs/github-oauth-setup.md) | 如何为一键提交本体目录 PR 配置 GitHub OAuth |
 | [嵌入安全](docs/embed-security.md) | 可嵌入小组件的安全模型 |
