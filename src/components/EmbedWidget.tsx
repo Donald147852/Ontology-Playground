@@ -47,6 +47,7 @@ import {
   EMBED_THEMES,
   type EmbedThemeTokens,
 } from './embedTheme';
+import { SemanticDepthSlider } from './SemanticDepthSlider';
 import { useGraphNodeActionPosition } from './useGraphNodeActionPosition';
 
 cytoscape.use(fcose);
@@ -919,15 +920,12 @@ function EmbedLargeGraphControls({
                 Reset view
               </button>
             </div>
-            <input
+            <SemanticDepthSlider
               id="embed-graph-depth"
-              type="range"
-              min={1}
               max={maxDepth}
-              step={1}
               value={depth}
               disabled={maxDepth <= 1}
-              onChange={(event) => onDepthChange(Number(event.target.value))}
+              onDepthChange={onDepthChange}
               aria-label={`Detail: ${depth} ${depth === 1 ? 'hop' : 'hops'}`}
               aria-valuetext={`${depth} ${depth === 1 ? 'hop' : 'hops'}`}
               style={{

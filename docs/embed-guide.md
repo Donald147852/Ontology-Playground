@@ -140,7 +140,9 @@ This scans the DOM for new `.ontology-embed` elements and mounts widgets on any 
 - **Adaptive large-ontology view** — massive ontologies open as a bounded
   semantic overview with search, adjustable hierarchy depth, and incremental
   `+N` boundary expansion that can be hidden again from the overview controls;
-  changing hierarchy depth clears the current selection and focus
+  changing hierarchy depth clears the current selection and focus, while
+  off-thumb track clicks, dragging, touch, and arrow-key adjustments are all
+  supported
 - **Inspector overlay** — click any entity or relationship to see its properties
 - **RDF Source tab** — view the generated RDF/XML with a Copy button
 - **Dark & light themes** — match your site's design

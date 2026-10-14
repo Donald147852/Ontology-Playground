@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import type { GraphView } from '../lib/graphView';
+import { SemanticDepthSlider } from './SemanticDepthSlider';
 
 interface LargeGraphControlsProps {
   graphView: GraphView;
@@ -106,15 +107,12 @@ export function LargeGraphControls({
                 Reset view
               </button>
             </div>
-            <input
+            <SemanticDepthSlider
               id="large-graph-depth"
-              type="range"
-              min={1}
               max={maxDepth}
-              step={1}
               value={depth}
               disabled={maxDepth <= 1}
-              onChange={(event) => onDepthChange(Number(event.target.value))}
+              onDepthChange={onDepthChange}
               aria-label={`Detail: ${depth} ${depth === 1 ? 'hop' : 'hops'}`}
               aria-valuetext={`${depth} ${depth === 1 ? 'hop' : 'hops'}`}
             />
