@@ -223,6 +223,7 @@ GitHub Pages を利用できます。
 | `VITE_BASE_PATH` | `/` | アプリのベースパス（GitHub Pages では自動設定） |
 | `VITE_GITHUB_CLIENT_ID` | *（空）* | ワンクリックのカタログ PR 用 GitHub OAuth App クライアント ID（[設定ガイド](docs/github-oauth-setup.md)） |
 | `VITE_GITHUB_OAUTH_BASE` | *（空）* | GitHub Pages デプロイ用の外部 OAuth プロキシ URL（例：Cloudflare Worker URL） |
+| `VITE_API_BASE` | `/api` | 個別にデプロイした API ルートのベース URL（例：`https://example.azurewebsites.net/api`） |
 
 ## プロジェクト構成
 

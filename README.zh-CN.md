@@ -214,6 +214,7 @@ Azure Functions。Azure Functions API 是可选功能，需要它的用户可以
 | `VITE_BASE_PATH` | `/` | 应用的基础路径（GitHub Pages 会自动设置） |
 | `VITE_GITHUB_CLIENT_ID` | *（空）* | 用于一键提交本体目录 PR 的 GitHub OAuth App 客户端 ID（[设置指南](docs/github-oauth-setup.md)） |
 | `VITE_GITHUB_OAUTH_BASE` | *（空）* | GitHub Pages 部署使用的外部 OAuth 代理 URL（例如 Cloudflare Worker URL） |
+| `VITE_API_BASE` | `/api` | 单独部署的 API 路由基础 URL（例如 `https://example.azurewebsites.net/api`） |
 
 ## 项目结构
 

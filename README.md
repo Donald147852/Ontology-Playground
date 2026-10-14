@@ -224,6 +224,7 @@ They do not deploy managed Azure Functions.
 | `VITE_BASE_PATH` | `/` | Base path for the app (set automatically for GitHub Pages) |
 | `VITE_GITHUB_CLIENT_ID` | *(empty)* | GitHub OAuth App client ID for one-click catalogue PRs ([setup guide](docs/github-oauth-setup.md)) |
 | `VITE_GITHUB_OAUTH_BASE` | *(empty)* | External OAuth proxy URL for GitHub Pages deployments (e.g. Cloudflare Worker URL) |
+| `VITE_API_BASE` | `/api` | Base URL for separately deployed API routes (e.g. `https://example.azurewebsites.net/api`) |
 
 ### Optional Azure Functions API
 
@@ -246,9 +247,12 @@ npm --prefix api start
 The AI builder requires `AZURE_OPENAI_ENDPOINT` and `AZURE_OPENAI_API_KEY`.
 `AZURE_OPENAI_DEPLOYMENT` defaults to `gpt-4o-mini`. Keep
 `FUNCTIONS_NODE_BLOCK_ON_ENTRY_POINT_ERROR=true` so registration failures stop
-the Functions host instead of leaving routes unavailable. Set
-`VITE_GITHUB_OAUTH_BASE` to the separately deployed proxy URL when enabling the
-GitHub device flow in a static deployment.
+the Functions host instead of leaving routes unavailable. For a static
+frontend, set `VITE_API_BASE` to the Function App's `/api` URL for the AI
+builder and `VITE_GITHUB_OAUTH_BASE` to its `/api/github-oauth` URL for the
+GitHub device flow. Configure the Function App to allow the frontend origin
+through CORS. Set the repository Actions variable `VITE_ENABLE_AI_BUILDER` to
+`true` when the deployed frontend should expose the AI builder.
 
 ## Project Structure
 

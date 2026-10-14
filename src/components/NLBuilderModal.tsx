@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { X, Sparkles, Send, Loader2, Check, AlertCircle, Edit3, Mic, MicOff } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
 import type { Ontology } from '../data/ontology';
+import { buildApiUrl } from '../lib/api';
 
 // Web Speech API types
 interface SpeechRecognitionEvent extends Event {
@@ -193,7 +194,7 @@ export function NLBuilderModal({ onClose }: NLBuilderModalProps) {
     setError(null);
     
     try {
-      const response = await fetch('/api/generate-ontology', {
+      const response = await fetch(buildApiUrl('generate-ontology'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ description: description.trim() }),
