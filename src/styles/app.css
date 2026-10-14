@@ -829,7 +829,8 @@ body {
 
 .large-graph-collapse,
 .large-graph-search button,
-.large-graph-options button {
+.large-graph-options button,
+.large-graph-selection-action button {
   padding: 6px 10px;
   background: var(--bg-secondary);
   color: var(--text-primary);
@@ -842,7 +843,8 @@ body {
 
 .large-graph-collapse:hover,
 .large-graph-search button:hover,
-.large-graph-options button:hover {
+.large-graph-options button:hover,
+.large-graph-selection-action button:hover {
   background: var(--ms-blue);
   color: var(--on-accent);
   border-color: var(--ms-blue);
@@ -957,6 +959,23 @@ body {
 
 .large-graph-status p {
   margin: 0;
+}
+
+.large-graph-selection-action {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  margin-top: 8px;
+}
+
+.large-graph-selection-action button {
+  width: 100%;
+  min-height: 36px;
+}
+
+.large-graph-selection-action p {
+  margin: 0;
+  color: var(--text-secondary);
 }
 
 .graph-legend {

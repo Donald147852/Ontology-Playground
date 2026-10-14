@@ -10,9 +10,15 @@ interface LargeGraphControlsProps {
   depth: number;
   maxDepth: number;
   canReset: boolean;
+  selectedEntity: {
+    name: string;
+    hiddenNeighborCount: number;
+    isExpanded: boolean;
+  } | null;
   onSearchInputChange: (value: string) => void;
   onSearch: () => void;
   onDepthChange: (depth: number) => void;
+  onExpandSelectedEntity: () => void;
   onShowOverview: () => void;
 }
 
@@ -25,9 +31,11 @@ export function LargeGraphControls({
   depth,
   maxDepth,
   canReset,
+  selectedEntity,
   onSearchInputChange,
   onSearch,
   onDepthChange,
+  onExpandSelectedEntity,
   onShowOverview,
 }: LargeGraphControlsProps) {
   const [collapsed, setCollapsed] = useState(false);
@@ -110,6 +118,34 @@ export function LargeGraphControls({
             />
           </div>
 
+          {selectedEntity && (
+            <div className="large-graph-selection-action">
+              {selectedEntity.hiddenNeighborCount > 0
+                && !selectedEntity.isExpanded ? (
+                  <button
+                    type="button"
+                    aria-label={`Show ${selectedEntity.hiddenNeighborCount} hidden ${
+                      selectedEntity.hiddenNeighborCount === 1
+                        ? 'neighbor'
+                        : 'neighbors'
+                    } for ${selectedEntity.name}`}
+                    onClick={onExpandSelectedEntity}
+                  >
+                    Show {selectedEntity.hiddenNeighborCount.toLocaleString()}{' '}
+                    hidden {selectedEntity.hiddenNeighborCount === 1
+                      ? 'neighbor'
+                      : 'neighbors'}
+                  </button>
+                ) : (
+                  <p>
+                    {selectedEntity.isExpanded
+                      ? 'This entity is already expanded.'
+                      : 'All of this entity’s neighbors are visible.'}
+                  </p>
+                )}
+            </div>
+          )}
+
           {appliedSearch && (
             <div className="large-graph-status" aria-live="polite">
               {graphView.searchMatchCount > 0 ? (
@@ -125,8 +161,8 @@ export function LargeGraphControls({
             </div>
           )}
           <p className="large-graph-hint">
-            “+N” marks hidden neighbors. Double-click that entity to reveal one
-            more hop, or use Search &amp; Filter to jump anywhere.
+            Dashed “+N” entities have hidden neighbors. Select one, then use
+            Show neighbors to expand it without losing your place.
           </p>
         </>
       )}

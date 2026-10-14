@@ -1,7 +1,12 @@
 import { useEffect, useRef, useCallback, useMemo, useState } from 'react';
 import cytoscape from 'cytoscape';
 import fcose from 'cytoscape-fcose';
-import type { Core, EventObject, LayoutOptions } from 'cytoscape';
+import type {
+  Core,
+  ElementDefinition,
+  EventObject,
+  LayoutOptions,
+} from 'cytoscape';
 import { useAppStore } from '../store/appStore';
 import { ZoomIn, ZoomOut, Maximize2, RotateCcw, Download, Crosshair } from 'lucide-react';
 import {
@@ -11,6 +16,12 @@ import {
   graphViewMaxDepth,
   type GraphViewMode,
 } from '../lib/graphView';
+import {
+  captureGraphPositionSnapshot,
+  preserveGraphElementPositions,
+  restoreGraphViewport,
+  type GraphPositionSnapshot,
+} from '../lib/graphPositionPersistence';
 import { LargeGraphControls } from './LargeGraphControls';
 
 // Register fcose layout
@@ -97,6 +108,7 @@ export function OntologyGraph() {
     () => new Set(),
   );
   const [graphZoom, setGraphZoom] = useState(MIN_GRAPH_ZOOM);
+  const pendingPositionSnapshotRef = useRef<GraphPositionSnapshot | null>(null);
   
   // Helper to safely get cytoscape instance - returns null if destroyed
   const getCy = useCallback(() => {
@@ -110,6 +122,13 @@ export function OntologyGraph() {
     }
     return cy;
   }, []);
+
+  const preserveCurrentGraphPosition = useCallback((anchorId?: string) => {
+    const cy = getCy();
+    pendingPositionSnapshotRef.current = cy
+      ? captureGraphPositionSnapshot(cy, anchorId)
+      : null;
+  }, [getCy]);
   
   const {
     currentOntology,
@@ -126,21 +145,104 @@ export function OntologyGraph() {
     darkMode,
     theme
   } = useAppStore();
-  const graphView = useMemo(
+  const selectedGraphItemRef = useRef({
+    entityId: selectedEntityId,
+    relationshipId: selectedRelationshipId,
+  });
+  useEffect(() => {
+    selectedGraphItemRef.current = {
+      entityId: selectedEntityId,
+      relationshipId: selectedRelationshipId,
+    };
+  }, [selectedEntityId, selectedRelationshipId]);
+
+  const applySelectionState = useCallback((cy: Core) => {
+    const { entityId, relationshipId } = selectedGraphItemRef.current;
+
+    if (focusNodeIdRef.current !== null) {
+      cy.elements().unselect();
+      if (entityId) cy.getElementById(entityId).select();
+      if (relationshipId) cy.getElementById(relationshipId).select();
+      return;
+    }
+
+    cy.elements().removeClass('highlighted dimmed');
+    cy.elements().unselect();
+
+    if (entityId) {
+      const node = cy.getElementById(entityId);
+      node.select();
+      const connectedEdges = node.connectedEdges();
+      const connectedNodes = connectedEdges.connectedNodes();
+
+      cy.elements().addClass('dimmed');
+      node.removeClass('dimmed');
+      connectedEdges.removeClass('dimmed');
+      connectedNodes.removeClass('dimmed');
+    }
+
+    if (relationshipId) {
+      const edge = cy.getElementById(relationshipId);
+      edge.select();
+      const connectedNodes = edge.connectedNodes();
+
+      cy.elements().addClass('dimmed');
+      edge.removeClass('dimmed');
+      connectedNodes.removeClass('dimmed');
+    }
+  }, []);
+
+  const baseGraphView = useMemo(
     () => createGraphView(currentOntology, {
       search: largeSearch,
       depth: largeDepth,
-      expandedNodeIds: [
-        ...expandedNodeIds,
-        ...(selectedEntityId ? [selectedEntityId] : []),
-        ...highlightedEntities,
-      ],
-      priorityRelationshipIds: [
-        ...(selectedRelationshipId ? [selectedRelationshipId] : []),
-        ...highlightedRelationships,
-      ],
+      expandedNodeIds,
     }),
     [
+      currentOntology,
+      expandedNodeIds,
+      largeDepth,
+      largeSearch,
+    ],
+  );
+  const graphView = useMemo(() => {
+    const visibleEntityIds = new Set(
+      baseGraphView.entities.map((entity) => entity.id),
+    );
+    const visibleRelationshipIds = new Set(
+      baseGraphView.relationships.map((relationship) => relationship.id),
+    );
+    const revealEntityIds = [
+      ...(selectedEntityId && !visibleEntityIds.has(selectedEntityId)
+        ? [selectedEntityId]
+        : []),
+      ...highlightedEntities.filter((id) => !visibleEntityIds.has(id)),
+    ];
+    const revealRelationshipIds = [
+      ...(selectedRelationshipId
+        && !visibleRelationshipIds.has(selectedRelationshipId)
+        ? [selectedRelationshipId]
+        : []),
+      ...highlightedRelationships.filter(
+        (id) => !visibleRelationshipIds.has(id),
+      ),
+    ];
+
+    if (
+      revealEntityIds.length === 0
+      && revealRelationshipIds.length === 0
+    ) {
+      return baseGraphView;
+    }
+
+    return createGraphView(currentOntology, {
+      search: largeSearch,
+      depth: largeDepth,
+      expandedNodeIds: [...expandedNodeIds, ...revealEntityIds],
+      priorityRelationshipIds: revealRelationshipIds,
+    });
+  }, [
+      baseGraphView,
       currentOntology,
       expandedNodeIds,
       highlightedEntities,
@@ -149,13 +251,31 @@ export function OntologyGraph() {
       largeSearch,
       selectedEntityId,
       selectedRelationshipId,
-    ],
-  );
+  ]);
   const isBoundedView = graphView.mode === 'bounded';
   const maxLargeDepth = useMemo(
     () => graphViewMaxDepth(currentOntology),
     [currentOntology],
   );
+  const selectedOverviewEntity = useMemo(() => {
+    if (!selectedEntityId) return null;
+    const entity = graphView.entities.find(
+      (candidate) => candidate.id === selectedEntityId,
+    );
+    if (!entity) return null;
+    return {
+      id: entity.id,
+      name: entity.name,
+      hiddenNeighborCount:
+        graphView.hiddenNeighborCounts.get(entity.id) ?? 0,
+      isExpanded: expandedNodeIds.has(entity.id),
+    };
+  }, [
+    expandedNodeIds,
+    graphView.entities,
+    graphView.hiddenNeighborCounts,
+    selectedEntityId,
+  ]);
   const graphRootIds = useMemo(() => {
     const visibleIds = new Set(graphView.entities.map((entity) => entity.id));
     const visibleRootIds = graphView.rootIds.filter((id) => visibleIds.has(id));
@@ -172,6 +292,7 @@ export function OntologyGraph() {
     setLargeDepth(DEFAULT_LARGE_GRAPH_DEPTH);
     setExpandedNodeIds(new Set());
     setFocusNodeId(null);
+    pendingPositionSnapshotRef.current = null;
   }, [currentOntology]);
 
   // Use refs for quest state to avoid re-creating the graph when quest changes
@@ -198,7 +319,7 @@ export function OntologyGraph() {
     graphThemeColors.current = themeColors;
   }, [themeColors]);
 
-  const buildElements = useCallback(() => {
+  const buildElements = useCallback((): ElementDefinition[] => {
     const rootIds = new Set(graphView.rootIds);
     const nodes = graphView.entities.map((entity) => {
       const hiddenNeighborCount = graphView.hiddenNeighborCounts.get(entity.id) ?? 0;
@@ -241,9 +362,17 @@ export function OntologyGraph() {
   useEffect(() => {
     if (!containerRef.current) return;
 
+    const baseElements = buildElements();
+    const positionSnapshot = isBoundedView
+      ? pendingPositionSnapshotRef.current
+      : null;
+    const positionedElements = positionSnapshot
+      ? preserveGraphElementPositions(baseElements, positionSnapshot)
+      : null;
+
     const cy = cytoscape({
       container: containerRef.current,
-      elements: buildElements(),
+      elements: positionedElements ?? baseElements,
       style: [
         // Base node style
         {
@@ -391,10 +520,17 @@ export function OntologyGraph() {
         }
       ],
        
-      layout: graphLayoutOptions(graphView.mode, graphRootIds),
+      layout: positionedElements
+        ? { name: 'preset', fit: false }
+        : graphLayoutOptions(graphView.mode, graphRootIds),
       minZoom: MIN_GRAPH_ZOOM,
       maxZoom: MAX_GRAPH_ZOOM
     });
+
+    if (positionSnapshot && positionedElements) {
+      restoreGraphViewport(cy, positionSnapshot);
+    }
+    pendingPositionSnapshotRef.current = null;
 
     let boundedLabelsHidden: boolean | null = null;
     const syncBoundedLabels = () => {
@@ -459,12 +595,7 @@ export function OntologyGraph() {
 
     cy.on('dbltap', 'node', (evt: EventObject) => {
       const nodeId = evt.target.id();
-      if (isBoundedView) {
-        if ((graphView.hiddenNeighborCounts.get(nodeId) ?? 0) > 0) {
-          setExpandedNodeIds((current) => new Set(current).add(nodeId));
-        }
-        return;
-      }
+      if (isBoundedView) return;
 
       const alreadyFocused = focusNodeIdRef.current === nodeId;
 
@@ -486,6 +617,7 @@ export function OntologyGraph() {
     cyRef.current = cy;
     window.__ONTOLOGY_PREVIEW_CY__ = cy;
     mountedRef.current = true;
+    applySelectionState(cy);
 
     return () => {
       mountedRef.current = false;
@@ -496,9 +628,9 @@ export function OntologyGraph() {
       cyRef.current = null;
     };
   }, [
+    applySelectionState,
     buildElements,
     getCy,
-    graphView.hiddenNeighborCounts,
     graphView.mode,
     graphRootIds,
     isBoundedView,
@@ -549,50 +681,13 @@ export function OntologyGraph() {
   useEffect(() => {
     const cy = getCy();
     if (!cy) return;
-
-    // If focus mode is active, let the focus effect manage dimming
-    if (focusNodeIdRef.current !== null) {
-      // Just update selection highlight without touching dimmed
-      try {
-        cy.elements().unselect();
-        if (selectedEntityId) cy.getElementById(selectedEntityId).select();
-        if (selectedRelationshipId) cy.getElementById(selectedRelationshipId).select();
-      } catch { /* ignore */ }
-      return;
-    }
-
-    try {
-      cy.elements().removeClass('highlighted dimmed');
-      cy.elements().unselect();
-
-      if (selectedEntityId) {
-        const node = cy.getElementById(selectedEntityId);
-        node.select();
-        
-        // Highlight connected edges and nodes
-        const connectedEdges = node.connectedEdges();
-        const connectedNodes = connectedEdges.connectedNodes();
-        
-        cy.elements().addClass('dimmed');
-        node.removeClass('dimmed');
-        connectedEdges.removeClass('dimmed');
-        connectedNodes.removeClass('dimmed');
-      }
-
-      if (selectedRelationshipId) {
-        const edge = cy.getElementById(selectedRelationshipId);
-        edge.select();
-        
-        const connectedNodes = edge.connectedNodes();
-        
-        cy.elements().addClass('dimmed');
-        edge.removeClass('dimmed');
-        connectedNodes.removeClass('dimmed');
-      }
-    } catch {
-      // Graph may have been destroyed
-    }
-  }, [selectedEntityId, selectedRelationshipId, getCy]);
+    applySelectionState(cy);
+  }, [
+    applySelectionState,
+    getCy,
+    selectedEntityId,
+    selectedRelationshipId,
+  ]);
 
   // Handle highlights from queries
   useEffect(() => {
@@ -673,6 +768,7 @@ export function OntologyGraph() {
   };
 
   const handleLargeSearch = () => {
+    pendingPositionSnapshotRef.current = null;
     setLargeSearch(largeSearchInput.trim());
     setExpandedNodeIds(new Set());
     selectEntity(null);
@@ -681,6 +777,7 @@ export function OntologyGraph() {
   };
 
   const handleShowOverview = () => {
+    pendingPositionSnapshotRef.current = null;
     setLargeSearchInput('');
     setLargeSearch('');
     setLargeDepth(DEFAULT_LARGE_GRAPH_DEPTH);
@@ -688,6 +785,28 @@ export function OntologyGraph() {
     selectEntity(null);
     selectRelationship(null);
     clearHighlights();
+  };
+
+  const handleLargeDepthChange = (nextDepth: number) => {
+    if (nextDepth === largeDepth) return;
+    preserveCurrentGraphPosition();
+    setLargeDepth(nextDepth);
+  };
+
+  const handleExpandSelectedEntity = () => {
+    if (
+      !selectedOverviewEntity
+      || selectedOverviewEntity.hiddenNeighborCount === 0
+      || selectedOverviewEntity.isExpanded
+    ) {
+      return;
+    }
+
+    preserveCurrentGraphPosition(selectedOverviewEntity.id);
+    setExpandedNodeIds((current) => {
+      if (current.has(selectedOverviewEntity.id)) return current;
+      return new Set(current).add(selectedOverviewEntity.id);
+    });
   };
 
   const handleDownload = () => {
@@ -732,9 +851,11 @@ export function OntologyGraph() {
           depth={largeDepth}
           maxDepth={maxLargeDepth}
           canReset={canResetLargeView}
+          selectedEntity={selectedOverviewEntity}
           onSearchInputChange={setLargeSearchInput}
           onSearch={handleLargeSearch}
-          onDepthChange={setLargeDepth}
+          onDepthChange={handleLargeDepthChange}
+          onExpandSelectedEntity={handleExpandSelectedEntity}
           onShowOverview={handleShowOverview}
         />
       )}

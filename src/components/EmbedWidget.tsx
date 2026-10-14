@@ -12,7 +12,12 @@
 import { useEffect, useRef, useState, useMemo, type FormEvent } from 'react';
 import cytoscape from 'cytoscape';
 import fcose from 'cytoscape-fcose';
-import type { Core, EventObject, LayoutOptions } from 'cytoscape';
+import type {
+  Core,
+  ElementDefinition,
+  EventObject,
+  LayoutOptions,
+} from 'cytoscape';
 import type { Ontology, EntityType, Relationship } from '../data/ontology';
 import { serializeToRDF } from '../lib/rdf/serializer';
 import { parseRDF } from '../lib/rdf/parser';
@@ -24,6 +29,12 @@ import {
   graphViewMaxDepth,
   type GraphView,
 } from '../lib/graphView';
+import {
+  captureGraphPositionSnapshot,
+  preserveGraphElementPositions,
+  restoreGraphViewport,
+  type GraphPositionSnapshot,
+} from '../lib/graphPositionPersistence';
 import type { Catalogue } from '../types/catalogue';
 
 cytoscape.use(fcose);
@@ -272,6 +283,11 @@ interface EmbedGraphProps {
 function EmbedGraph({ ontology, theme, selected, setSelected }: EmbedGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
+  const pendingPositionSnapshotRef = useRef<GraphPositionSnapshot | null>(null);
+  const selectedRef = useRef(selected);
+  useEffect(() => {
+    selectedRef.current = selected;
+  }, [selected]);
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [depth, setDepth] = useState(DEFAULT_LARGE_GRAPH_DEPTH);
@@ -283,6 +299,24 @@ function EmbedGraph({ ontology, theme, selected, setSelected }: EmbedGraphProps)
     [depth, expandedNodeIds, ontology, search],
   );
   const maxDepth = useMemo(() => graphViewMaxDepth(ontology), [ontology]);
+  const selectedOverviewEntity = useMemo(() => {
+    const entity = selected?.type === 'entity' ? selected.entity : undefined;
+    if (!entity || !graphView.entities.some(({ id }) => id === entity.id)) {
+      return null;
+    }
+    return {
+      id: entity.id,
+      name: entity.name,
+      hiddenNeighborCount:
+        graphView.hiddenNeighborCounts.get(entity.id) ?? 0,
+      isExpanded: expandedNodeIds.has(entity.id),
+    };
+  }, [
+    expandedNodeIds,
+    graphView.entities,
+    graphView.hiddenNeighborCounts,
+    selected,
+  ]);
   const graphOntologyRef = useRef(ontology);
 
   useEffect(() => {
@@ -292,9 +326,10 @@ function EmbedGraph({ ontology, theme, selected, setSelected }: EmbedGraphProps)
     setSearch('');
     setDepth(DEFAULT_LARGE_GRAPH_DEPTH);
     setExpandedNodeIds(new Set());
+    pendingPositionSnapshotRef.current = null;
   }, [ontology]);
 
-  const elements = useMemo(() => {
+  const elements = useMemo<ElementDefinition[]>(() => {
     const rootIds = new Set(graphView.rootIds);
     const nodes = graphView.entities.map((entity) => {
       const hiddenNeighborCount = graphView.hiddenNeighborCounts.get(entity.id) ?? 0;
@@ -366,9 +401,15 @@ function EmbedGraph({ ontology, theme, selected, setSelected }: EmbedGraphProps)
   useEffect(() => {
     if (!containerRef.current) return;
 
+    const positionSnapshot = graphView.mode === 'bounded'
+      ? pendingPositionSnapshotRef.current
+      : null;
+    const positionedElements = positionSnapshot
+      ? preserveGraphElementPositions(elements, positionSnapshot)
+      : null;
     const cy = cytoscape({
       container: containerRef.current,
-      elements,
+      elements: positionedElements ?? elements,
       style: [
         {
           selector: 'node',
@@ -446,13 +487,20 @@ function EmbedGraph({ ontology, theme, selected, setSelected }: EmbedGraphProps)
           },
         },
       ],
-      layout,
+      layout: positionedElements
+        ? { name: 'preset', fit: false }
+        : layout,
       minZoom: 0.3, maxZoom: 3,
       userPanningEnabled: true,
       userZoomingEnabled: true,
       boxSelectionEnabled: false,
       autoungrabify: true,
     });
+
+    if (positionSnapshot && positionedElements) {
+      restoreGraphViewport(cy, positionSnapshot);
+    }
+    pendingPositionSnapshotRef.current = null;
 
     let boundedLabelsHidden: boolean | null = null;
     const syncBoundedLabels = () => {
@@ -486,19 +534,16 @@ function EmbedGraph({ ontology, theme, selected, setSelected }: EmbedGraphProps)
       if (evt.target === cy) setSelected(null);
     });
 
-    cy.on('dbltap', 'node', (evt: EventObject) => {
-      if (graphView.mode !== 'bounded') return;
-      const id = evt.target.id();
-      if ((graphView.hiddenNeighborCounts.get(id) ?? 0) > 0) {
-        setExpandedNodeIds((current) => new Set(current).add(id));
-      }
-    });
-
     cyRef.current = cy;
+    const selectedItem = selectedRef.current;
+    if (selectedItem?.entity) {
+      cy.getElementById(selectedItem.entity.id).select();
+    } else if (selectedItem?.relationship) {
+      cy.getElementById(selectedItem.relationship.id).select();
+    }
     return () => { cy.destroy(); cyRef.current = null; };
   }, [
     elements,
-    graphView.hiddenNeighborCounts,
     graphView.mode,
     layout,
     ontology,
@@ -507,17 +552,48 @@ function EmbedGraph({ ontology, theme, selected, setSelected }: EmbedGraphProps)
   ]);
 
   const handleSearch = () => {
+    pendingPositionSnapshotRef.current = null;
     setSearch(searchInput.trim());
     setExpandedNodeIds(new Set());
     setSelected(null);
   };
 
   const handleOverview = () => {
+    pendingPositionSnapshotRef.current = null;
     setSearchInput('');
     setSearch('');
     setDepth(DEFAULT_LARGE_GRAPH_DEPTH);
     setExpandedNodeIds(new Set());
     setSelected(null);
+  };
+
+  const handleDepthChange = (nextDepth: number) => {
+    if (nextDepth === depth) return;
+    pendingPositionSnapshotRef.current = cyRef.current
+      ? captureGraphPositionSnapshot(cyRef.current)
+      : null;
+    setDepth(nextDepth);
+  };
+
+  const handleExpandSelectedEntity = () => {
+    if (
+      !selectedOverviewEntity
+      || selectedOverviewEntity.hiddenNeighborCount === 0
+      || selectedOverviewEntity.isExpanded
+    ) {
+      return;
+    }
+
+    pendingPositionSnapshotRef.current = cyRef.current
+      ? captureGraphPositionSnapshot(
+          cyRef.current,
+          selectedOverviewEntity.id,
+        )
+      : null;
+    setExpandedNodeIds((current) => {
+      if (current.has(selectedOverviewEntity.id)) return current;
+      return new Set(current).add(selectedOverviewEntity.id);
+    });
   };
 
   return (
@@ -542,10 +618,12 @@ function EmbedGraph({ ontology, theme, selected, setSelected }: EmbedGraphProps)
             || expandedNodeIds.size > 0
             || selected !== null
           )}
+          selectedEntity={selectedOverviewEntity}
           theme={theme}
           onSearchInputChange={setSearchInput}
           onSearch={handleSearch}
-          onDepthChange={setDepth}
+          onDepthChange={handleDepthChange}
+          onExpandSelectedEntity={handleExpandSelectedEntity}
           onOverview={handleOverview}
         />
       )}
@@ -562,10 +640,16 @@ interface EmbedLargeGraphControlsProps {
   depth: number;
   maxDepth: number;
   canReset: boolean;
+  selectedEntity: {
+    name: string;
+    hiddenNeighborCount: number;
+    isExpanded: boolean;
+  } | null;
   theme: ThemeTokens;
   onSearchInputChange: (value: string) => void;
   onSearch: () => void;
   onDepthChange: (depth: number) => void;
+  onExpandSelectedEntity: () => void;
   onOverview: () => void;
 }
 
@@ -578,10 +662,12 @@ function EmbedLargeGraphControls({
   depth,
   maxDepth,
   canReset,
+  selectedEntity,
   theme,
   onSearchInputChange,
   onSearch,
   onDepthChange,
+  onExpandSelectedEntity,
   onOverview,
 }: EmbedLargeGraphControlsProps) {
   const [collapsed, setCollapsed] = useState(false);
@@ -720,6 +806,39 @@ function EmbedLargeGraphControls({
               }}
             />
           </div>
+          {selectedEntity && (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              minHeight: 44,
+              marginTop: 8,
+            }}>
+              {selectedEntity.hiddenNeighborCount > 0
+                && !selectedEntity.isExpanded ? (
+                  <button
+                    type="button"
+                    aria-label={`Show ${selectedEntity.hiddenNeighborCount} hidden ${
+                      selectedEntity.hiddenNeighborCount === 1
+                        ? 'neighbor'
+                        : 'neighbors'
+                    } for ${selectedEntity.name}`}
+                    style={{ ...buttonStyle, width: '100%' }}
+                    onClick={onExpandSelectedEntity}
+                  >
+                    Show {selectedEntity.hiddenNeighborCount.toLocaleString()}{' '}
+                    hidden {selectedEntity.hiddenNeighborCount === 1
+                      ? 'neighbor'
+                      : 'neighbors'}
+                  </button>
+                ) : (
+                  <div style={{ color: theme.textSecondary }}>
+                    {selectedEntity.isExpanded
+                      ? 'This entity is already expanded.'
+                      : 'All of this entity’s neighbors are visible.'}
+                  </div>
+                )}
+            </div>
+          )}
           {appliedSearch && (
             <div
               role={graphView.searchMatchCount === 0 ? 'alert' : 'status'}
@@ -736,7 +855,8 @@ function EmbedLargeGraphControls({
             </div>
           )}
           <div style={{ marginTop: 8, color: theme.textTertiary, lineHeight: 1.35 }}>
-            “+N” marks hidden neighbors. Double-click to reveal one more hop.
+            Dashed “+N” entities have hidden neighbors. Select one, then use
+            {' '}Show neighbors to expand it without losing your place.
           </div>
         </>
       )}

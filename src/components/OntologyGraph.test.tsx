@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Ontology, Relationship } from '../data/ontology';
 import {
+  createGraphView,
   MAX_RENDERED_EDGES,
   MAX_RENDERED_NODES,
 } from '../lib/graphView';
@@ -22,6 +23,7 @@ const graphMocks = vi.hoisted(() => {
     connectedNodes: chain,
     closedNeighborhood: chain,
     toggleClass: chain,
+    forEach: vi.fn(),
   });
 
   const cy = {
@@ -136,6 +138,39 @@ describe('OntologyGraph adaptive rendering', () => {
     });
     expect(screen.getByRole('slider', { name: 'Detail: 2 hops' })).toHaveValue('2');
     expect(resetView).toBeEnabled();
+  });
+
+  it('keeps a visible boundary entity anchored until expansion is requested', async () => {
+    const ontology = createLargeFixture();
+    const initialView = createGraphView(ontology);
+    const boundary = [...initialView.hiddenNeighborCounts.entries()][0];
+    expect(boundary).toBeDefined();
+    const [boundaryId, hiddenNeighborCount] = boundary!;
+
+    useAppStore.getState().loadOntology(ontology);
+    render(<OntologyGraph />);
+    await waitFor(() => {
+      expect(graphMocks.cytoscape).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      useAppStore.getState().selectEntity(boundaryId);
+    });
+
+    const expandButton = await screen.findByRole('button', {
+      name: `Show ${hiddenNeighborCount} hidden ${
+        hiddenNeighborCount === 1 ? 'neighbor' : 'neighbors'
+      } for ${ontology.entityTypes.find(({ id }) => id === boundaryId)?.name}`,
+    });
+    expect(graphMocks.cytoscape).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(expandButton);
+    await waitFor(() => {
+      expect(graphMocks.cytoscape).toHaveBeenCalledTimes(2);
+    });
+    expect(
+      screen.getByText('This entity is already expanded.'),
+    ).toBeInTheDocument();
   });
 
   it('reveals a hidden entity selected from another navigation surface', async () => {
