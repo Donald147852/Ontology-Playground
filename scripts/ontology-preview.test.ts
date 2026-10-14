@@ -1,14 +1,19 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { catalogueIdFromPath, entriesFromNameStatus } from './list-changed-catalogue-entries';
+import {
+  catalogueIdFromPath,
+  entriesFromNameStatus,
+  type OntologyPreviewManifest,
+} from './list-changed-catalogue-entries';
 import {
   preparePreviewAssets,
   validateManifest,
   type RenderedManifest,
   type TrustedPreviewRun,
 } from './prepare-ontology-preview-assets';
+import { writeRenderedManifest } from './render-ontology-previews';
 
 const temporaryDirectories: string[] = [];
 
@@ -137,18 +142,19 @@ describe('ontology preview artifact authentication', () => {
   it('creates a publishable sanitized package when there are no previews', () => {
     const root = mkdtempSync(join(tmpdir(), 'ontology-preview-'));
     temporaryDirectories.push(root);
-    const manifestPath = join(root, 'manifest.json');
+    const artifactDir = join(root, 'artifact');
     const publishDir = join(root, 'publish');
     const commentPath = join(root, 'comment.md');
-    const zeroPreviewManifest: RenderedManifest = {
+    const sourceManifest: OntologyPreviewManifest = {
       ...trustedRun,
-      previews: [],
+      baseSha: 'abcdef0123456789abcdef0123456789abcdef01',
+      entries: [],
     };
-    writeFileSync(manifestPath, JSON.stringify(zeroPreviewManifest), 'utf-8');
+    writeRenderedManifest(artifactDir, sourceManifest, []);
 
     preparePreviewAssets({
-      manifest: manifestPath,
-      artifactDir: join(root, 'artifact'),
+      manifest: join(artifactDir, 'manifest.json'),
+      artifactDir,
       publishDir,
       comment: commentPath,
       branch: 'ontology-preview-assets',
@@ -161,6 +167,10 @@ describe('ontology preview artifact authentication', () => {
       trustedRun.headSha,
       'manifest.json',
     );
+    const zeroPreviewManifest: RenderedManifest = {
+      ...trustedRun,
+      previews: [],
+    };
     expect(existsSync(sanitizedManifest)).toBe(true);
     expect(JSON.parse(readFileSync(sanitizedManifest, 'utf-8'))).toEqual(zeroPreviewManifest);
     expect(readFileSync(commentPath, 'utf-8')).toContain(
