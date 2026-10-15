@@ -1,13 +1,37 @@
-import { useEffect, useRef, useCallback, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import cytoscape from 'cytoscape';
 import fcose from 'cytoscape-fcose';
-import type { Core, EventObject, LayoutOptions } from 'cytoscape';
+import type {
+  Core,
+  ElementDefinition,
+  EventObject,
+  LayoutOptions,
+} from 'cytoscape';
 import { useAppStore } from '../store/appStore';
 import { ZoomIn, ZoomOut, Maximize2, RotateCcw, Download, Crosshair } from 'lucide-react';
 import {
-  isLargeOntologyGraph,
-  limitOntologyList,
-} from '../lib/ontologyScale';
+  BOUNDED_LABEL_ZOOM_THRESHOLD,
+  createGraphView,
+  DEFAULT_LARGE_GRAPH_DEPTH,
+  graphViewMaxDepth,
+  MAX_RENDERED_NODES,
+  type GraphViewMode,
+} from '../lib/graphView';
+import {
+  captureGraphPositionSnapshot,
+  preserveGraphElementPositions,
+  restoreGraphViewport,
+  type GraphPositionSnapshot,
+} from '../lib/graphPositionPersistence';
+import { LargeGraphControls } from './LargeGraphControls';
+import { useGraphNodeActionPosition } from './useGraphNodeActionPosition';
 
 // Register fcose layout
 cytoscape.use(fcose);
@@ -19,6 +43,49 @@ declare global {
 }
 
 type GraphColors = { nodeText: string; edgeColor: string; edgeText: string; edgeLabelBg: string };
+
+const MIN_GRAPH_ZOOM = 0.3;
+const MAX_GRAPH_ZOOM = 3;
+const GRAPH_ZOOM_STEP = 0.3;
+
+function graphLayoutOptions(
+  mode: GraphViewMode,
+  rootIds: readonly string[] = [],
+): LayoutOptions {
+  if (mode === 'bounded') {
+    return {
+      name: 'breadthfirst',
+      directed: false,
+      circle: true,
+      roots: [...rootIds],
+      animate: false,
+      fit: true,
+      padding: 60,
+      spacingFactor: 1.7,
+    } as LayoutOptions;
+  }
+
+  return {
+    name: 'fcose',
+    quality: mode === 'dense' ? 'default' : 'proof',
+    randomize: true,
+    animate: false,
+    fit: true,
+    padding: 60,
+    nodeDimensionsIncludeLabels: true,
+    nodeRepulsion: () => mode === 'dense' ? 10_000 : 15_000,
+    idealEdgeLength: () => mode === 'dense' ? 150 : 200,
+    edgeElasticity: () => 0.45,
+    nestingFactor: 0.1,
+    gravity: 0.25,
+    gravityRange: 3.8,
+    numIter: mode === 'dense' ? 1_200 : 2_500,
+    tile: true,
+    tilingPaddingVertical: 40,
+    tilingPaddingHorizontal: 40,
+    nodeSeparation: mode === 'dense' ? 70 : 100,
+  } as LayoutOptions;
+}
 
 // Read graph colors from the active theme's CSS custom properties, falling
 // back to the dark/light defaults when the variables can't be resolved yet.
@@ -39,10 +106,20 @@ function readGraphColors(darkMode: boolean, el?: HTMLElement | null): GraphColor
 
 export function OntologyGraph() {
   const cyRef = useRef<Core | null>(null);
+  const [graphInstance, setGraphInstance] = useState<Core | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const mountedRef = useRef(true);
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
   const focusNodeIdRef = useRef<string | null>(null);
+  const [largeSearchInput, setLargeSearchInput] = useState('');
+  const [largeSearch, setLargeSearch] = useState('');
+  const [largeDepth, setLargeDepth] = useState(DEFAULT_LARGE_GRAPH_DEPTH);
+  const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [graphZoom, setGraphZoom] = useState(MIN_GRAPH_ZOOM);
+  const pendingPositionSnapshotRef = useRef<GraphPositionSnapshot | null>(null);
+  const skipNextProjectionSnapshotRef = useRef(false);
   
   // Helper to safely get cytoscape instance - returns null if destroyed
   const getCy = useCallback(() => {
@@ -56,6 +133,13 @@ export function OntologyGraph() {
     }
     return cy;
   }, []);
+
+  const preserveCurrentGraphPosition = useCallback((anchorId?: string) => {
+    const cy = getCy();
+    pendingPositionSnapshotRef.current = cy
+      ? captureGraphPositionSnapshot(cy, anchorId)
+      : null;
+  }, [getCy]);
   
   const {
     currentOntology,
@@ -65,14 +149,214 @@ export function OntologyGraph() {
     highlightedRelationships,
     selectEntity,
     selectRelationship,
+    clearHighlights,
+    setHighlights,
     activeQuest,
     currentStepIndex,
     advanceQuestStep,
     darkMode,
     theme
   } = useAppStore();
-  const largeGraph = isLargeOntologyGraph(currentOntology);
-  const legendEntities = limitOntologyList(currentOntology.entityTypes);
+  const selectedGraphItemRef = useRef({
+    entityId: selectedEntityId,
+    relationshipId: selectedRelationshipId,
+  });
+  useEffect(() => {
+    selectedGraphItemRef.current = {
+      entityId: selectedEntityId,
+      relationshipId: selectedRelationshipId,
+    };
+  }, [selectedEntityId, selectedRelationshipId]);
+
+  const applySelectionState = useCallback((
+    cy: Core,
+    revealConnectedLabels: boolean,
+  ) => {
+    const { entityId, relationshipId } = selectedGraphItemRef.current;
+    cy.edges().removeClass('selected-node-edge');
+
+    if (focusNodeIdRef.current !== null) {
+      cy.elements().unselect();
+      if (entityId) {
+        const node = cy.getElementById(entityId);
+        node.select();
+        if (revealConnectedLabels) {
+          node.connectedEdges().addClass('selected-node-edge');
+        }
+      }
+      if (relationshipId) cy.getElementById(relationshipId).select();
+      return;
+    }
+
+    cy.elements().removeClass('dimmed');
+    cy.elements().unselect();
+
+    if (entityId) {
+      const node = cy.getElementById(entityId);
+      node.select();
+      const connectedEdges = node.connectedEdges();
+      const connectedNodes = connectedEdges.connectedNodes();
+
+      cy.elements().addClass('dimmed');
+      node.removeClass('dimmed');
+      if (revealConnectedLabels) {
+        connectedEdges.addClass('selected-node-edge');
+      }
+      connectedEdges.removeClass('dimmed');
+      connectedNodes.removeClass('dimmed');
+    }
+
+    if (relationshipId) {
+      const edge = cy.getElementById(relationshipId);
+      edge.select();
+      const connectedNodes = edge.connectedNodes();
+
+      cy.elements().addClass('dimmed');
+      edge.removeClass('dimmed');
+      connectedNodes.removeClass('dimmed');
+    }
+  }, []);
+
+  const baseGraphView = useMemo(
+    () => createGraphView(currentOntology, {
+      search: largeSearch,
+      depth: largeDepth,
+      expandedNodeIds,
+    }),
+    [
+      currentOntology,
+      expandedNodeIds,
+      largeDepth,
+      largeSearch,
+    ],
+  );
+  const graphView = useMemo(() => {
+    const visibleEntityIds = new Set(
+      baseGraphView.entities.map((entity) => entity.id),
+    );
+    const visibleRelationshipIds = new Set(
+      baseGraphView.relationships.map((relationship) => relationship.id),
+    );
+    const revealEntityIds = [
+      ...(selectedEntityId && !visibleEntityIds.has(selectedEntityId)
+        ? [selectedEntityId]
+        : []),
+      ...highlightedEntities.filter((id) => !visibleEntityIds.has(id)),
+    ];
+    const revealRelationshipIds = [
+      ...(selectedRelationshipId
+        && !visibleRelationshipIds.has(selectedRelationshipId)
+        ? [selectedRelationshipId]
+        : []),
+      ...highlightedRelationships.filter(
+        (id) => !visibleRelationshipIds.has(id),
+      ),
+    ];
+
+    if (
+      revealEntityIds.length === 0
+      && revealRelationshipIds.length === 0
+    ) {
+      return baseGraphView;
+    }
+
+    return createGraphView(currentOntology, {
+      search: largeSearch,
+      depth: largeDepth,
+      expandedNodeIds,
+      priorityEntityIds: revealEntityIds,
+      priorityRelationshipIds: revealRelationshipIds,
+    });
+  }, [
+      baseGraphView,
+      currentOntology,
+      expandedNodeIds,
+      highlightedEntities,
+      highlightedRelationships,
+      largeDepth,
+      largeSearch,
+      selectedEntityId,
+      selectedRelationshipId,
+  ]);
+  const isBoundedView = graphView.mode === 'bounded';
+  const maxLargeDepth = useMemo(
+    () => graphViewMaxDepth(currentOntology),
+    [currentOntology],
+  );
+  const selectedOverviewEntity = useMemo(() => {
+    if (!selectedEntityId) return null;
+    const entity = graphView.entities.find(
+      (candidate) => candidate.id === selectedEntityId,
+    );
+    if (!entity) return null;
+    return {
+      id: entity.id,
+      name: entity.name,
+      hiddenNeighborCount:
+        graphView.hiddenNeighborCounts.get(entity.id) ?? 0,
+      isExpanded: expandedNodeIds.has(entity.id),
+      canExpand: graphView.visibleNodeCount < MAX_RENDERED_NODES,
+    };
+  }, [
+    expandedNodeIds,
+    graphView.entities,
+    graphView.hiddenNeighborCounts,
+    graphView.visibleNodeCount,
+    selectedEntityId,
+  ]);
+  const neighborActionPosition = useGraphNodeActionPosition(
+    graphInstance,
+    selectedOverviewEntity?.id ?? null,
+    isBoundedView
+      && (selectedOverviewEntity?.hiddenNeighborCount ?? 0) > 0
+      && !selectedOverviewEntity?.isExpanded
+      && selectedOverviewEntity?.canExpand === true,
+  );
+  const graphRootIds = useMemo(() => {
+    const visibleIds = new Set(graphView.entities.map((entity) => entity.id));
+    const visibleRootIds = graphView.rootIds.filter((id) => visibleIds.has(id));
+    if (visibleRootIds.length > 0) return visibleRootIds;
+    return graphView.entities[0] ? [graphView.entities[0].id] : [];
+  }, [graphView.entities, graphView.rootIds]);
+  const graphOntologyRef = useRef(currentOntology);
+  const previousProjectionRef = useRef({
+    ontology: currentOntology,
+    graphView,
+  });
+
+  useLayoutEffect(() => {
+    const previous = previousProjectionRef.current;
+    if (
+      previous.ontology === currentOntology
+      && previous.graphView !== graphView
+      && previous.graphView.mode === 'bounded'
+      && graphView.mode === 'bounded'
+    ) {
+      if (skipNextProjectionSnapshotRef.current) {
+        skipNextProjectionSnapshotRef.current = false;
+      } else if (!pendingPositionSnapshotRef.current) {
+        preserveCurrentGraphPosition();
+      }
+    } else {
+      skipNextProjectionSnapshotRef.current = false;
+    }
+    previousProjectionRef.current = {
+      ontology: currentOntology,
+      graphView,
+    };
+  }, [currentOntology, graphView, preserveCurrentGraphPosition]);
+
+  useEffect(() => {
+    if (graphOntologyRef.current === currentOntology) return;
+    graphOntologyRef.current = currentOntology;
+    skipNextProjectionSnapshotRef.current = true;
+    setLargeSearchInput('');
+    setLargeSearch('');
+    setLargeDepth(DEFAULT_LARGE_GRAPH_DEPTH);
+    setExpandedNodeIds(new Set());
+    setFocusNodeId(null);
+    pendingPositionSnapshotRef.current = null;
+  }, [currentOntology]);
 
   // Use refs for quest state to avoid re-creating the graph when quest changes
   const activeQuestRef = useRef(activeQuest);
@@ -93,26 +377,33 @@ export function OntologyGraph() {
     setThemeColors(readGraphColors(darkMode, containerRef.current));
   }, [theme, darkMode]);
 
-  // Initial theme colors for graph creation
-  const initialThemeColors = useRef(themeColors);
+  const graphThemeColors = useRef(themeColors);
+  useEffect(() => {
+    graphThemeColors.current = themeColors;
+  }, [themeColors]);
 
-  // Build graph elements from ontology
-  const buildElements = useCallback(() => {
-    const nodes = currentOntology.entityTypes.map(entity => ({
-      data: {
-        id: entity.id,
-        label: `${entity.icon} ${entity.name}`,
-        name: entity.name,
-        icon: entity.icon,
-        color: entity.color,
-        description: entity.description,
-        type: 'entity'
-      }
-    }));
+  const buildElements = useCallback((): ElementDefinition[] => {
+    const rootIds = new Set(graphView.rootIds);
+    const nodes = graphView.entities.map((entity) => {
+      const hiddenNeighborCount = graphView.hiddenNeighborCounts.get(entity.id) ?? 0;
+      return {
+        data: {
+          id: entity.id,
+          label: `${entity.icon} ${entity.name}${hiddenNeighborCount > 0 ? ` · +${hiddenNeighborCount}` : ''}`,
+          name: entity.name,
+          icon: entity.icon,
+          color: entity.color,
+          description: entity.description,
+          hiddenNeighborCount,
+          isRoot: rootIds.has(entity.id) ? 1 : 0,
+          type: 'entity'
+        }
+      };
+    });
 
     const nodeIds = new Set(nodes.map(n => n.data.id));
 
-    const edges = currentOntology.relationships
+    const edges = graphView.relationships
       .filter(rel => rel.from && rel.to && nodeIds.has(rel.from) && nodeIds.has(rel.to))
       .map(rel => ({
         data: {
@@ -128,15 +419,23 @@ export function OntologyGraph() {
       }));
 
     return [...nodes, ...edges];
-  }, [currentOntology]);
+  }, [graphView]);
 
   // Initialize Cytoscape
   useEffect(() => {
     if (!containerRef.current) return;
 
+    const baseElements = buildElements();
+    const positionSnapshot = isBoundedView
+      ? pendingPositionSnapshotRef.current
+      : null;
+    const positionedElements = positionSnapshot
+      ? preserveGraphElementPositions(baseElements, positionSnapshot)
+      : null;
+
     const cy = cytoscape({
       container: containerRef.current,
-      elements: buildElements(),
+      elements: positionedElements ?? baseElements,
       style: [
         // Base node style
         {
@@ -148,10 +447,11 @@ export function OntologyGraph() {
             'font-size': '14px',
             'font-family': 'Segoe UI, sans-serif',
             'font-weight': 600,
-            'color': initialThemeColors.current.nodeText,
+            'min-zoomed-font-size': 9,
+            'color': graphThemeColors.current.nodeText,
             'text-margin-y': 10,
-            'width': 70,
-            'height': 70,
+            'width': graphView.mode === 'bounded' ? 34 : 70,
+            'height': graphView.mode === 'bounded' ? 34 : 70,
             'background-color': 'data(color)',
             'border-width': 3,
             'border-color': 'data(color)',
@@ -160,14 +460,43 @@ export function OntologyGraph() {
             'transition-duration': 200
           }
         },
+        {
+          selector: 'node.overview-label-hidden',
+          style: {
+            'label': ''
+          }
+        },
+        {
+          selector: 'node[hiddenNeighborCount > 0]',
+          style: {
+            'border-style': 'dashed',
+            'border-width': 5,
+            'width': 42,
+            'height': 42,
+            'min-zoomed-font-size': 8
+          }
+        },
+        {
+          selector: 'node[isRoot = 1]',
+          style: {
+            'border-style': 'solid',
+            'border-width': 5,
+            'width': 58,
+            'height': 58,
+            'font-size': '16px',
+            'min-zoomed-font-size': 8
+          }
+        },
         // Selected node
         {
           selector: 'node:selected',
           style: {
             'border-width': 5,
             'border-color': '#0078D4',
-            'width': 85,
-            'height': 85
+            'width': graphView.mode === 'bounded' ? 58 : 85,
+            'height': graphView.mode === 'bounded' ? 58 : 85,
+            'label': 'data(label)',
+            'min-zoomed-font-size': 0
           }
         },
         // Highlighted node
@@ -176,8 +505,10 @@ export function OntologyGraph() {
           style: {
             'border-width': 4,
             'border-color': '#FFB900',
-            'width': 80,
-            'height': 80
+            'width': graphView.mode === 'bounded' ? 54 : 80,
+            'height': graphView.mode === 'bounded' ? 54 : 80,
+            'label': 'data(label)',
+            'min-zoomed-font-size': 0
           }
         },
         // Dimmed node
@@ -191,21 +522,22 @@ export function OntologyGraph() {
         {
           selector: 'edge',
           style: {
-            'label': largeGraph ? '' : 'data(label)',
+            'label': graphView.mode === 'full' ? 'data(label)' : '',
             'font-size': '11px',
             'font-family': 'Segoe UI, sans-serif',
-            'color': initialThemeColors.current.edgeText,
+            'min-zoomed-font-size': 9,
+            'color': graphThemeColors.current.edgeText,
             'text-rotation': 'autorotate',
             'text-margin-y': -10,
             'text-wrap': 'ellipsis',
             'text-max-width': '120px',
-            'text-background-color': initialThemeColors.current.edgeLabelBg,
+            'text-background-color': graphThemeColors.current.edgeLabelBg,
             'text-background-opacity': 1,
             'text-background-padding': '2px',
             'text-background-shape': 'roundrectangle',
             'width': 3,
-            'line-color': initialThemeColors.current.edgeColor,
-            'target-arrow-color': initialThemeColors.current.edgeColor,
+            'line-color': graphThemeColors.current.edgeColor,
+            'target-arrow-color': graphThemeColors.current.edgeColor,
             'target-arrow-shape': 'triangle',
             'curve-style': 'unbundled-bezier',
             'control-point-step-size': 40,
@@ -220,6 +552,23 @@ export function OntologyGraph() {
             'line-style': 'dashed',
           }
         },
+        {
+          selector: 'edge.selected-node-edge',
+          style: {
+            'label': 'data(label)',
+            'min-zoomed-font-size': 0,
+          }
+        },
+        {
+          selector: 'edge.hovered',
+          style: {
+            'label': 'data(label)',
+            'width': 4,
+            'color': '#0078D4',
+            'line-color': '#0078D4',
+            'target-arrow-color': '#0078D4',
+          }
+        },
         // Selected edge
         {
           selector: 'edge:selected',
@@ -227,7 +576,8 @@ export function OntologyGraph() {
             'width': 5,
             'line-color': '#0078D4',
             'target-arrow-color': '#0078D4',
-            'color': '#0078D4'
+            'color': '#0078D4',
+            'label': 'data(label)'
           }
         },
         // Highlighted edge
@@ -237,7 +587,8 @@ export function OntologyGraph() {
             'width': 4,
             'line-color': '#FFB900',
             'target-arrow-color': '#FFB900',
-            'color': '#FFB900'
+            'color': '#FFB900',
+            'label': 'data(label)'
           }
         },
         // Dimmed edge
@@ -249,36 +600,33 @@ export function OntologyGraph() {
         }
       ],
        
-      layout: (largeGraph
-        ? {
-            name: 'grid',
-            animate: false,
-            fit: true,
-            padding: 30,
-          }
-        : {
-            name: 'fcose',
-            quality: 'proof',
-            randomize: false,
-            animate: false,
-            fit: true,
-            padding: 60,
-            nodeDimensionsIncludeLabels: true,
-            nodeRepulsion: () => 15000,
-            idealEdgeLength: () => 200,
-            edgeElasticity: () => 0.45,
-            nestingFactor: 0.1,
-            gravity: 0.25,
-            gravityRange: 3.8,
-            numIter: 2500,
-            tile: true,
-            tilingPaddingVertical: 40,
-            tilingPaddingHorizontal: 40,
-            nodeSeparation: 100
-          }) as LayoutOptions,
-      minZoom: 0.3,
-      maxZoom: 3
+      layout: positionedElements
+        ? { name: 'preset', fit: false }
+        : graphLayoutOptions(graphView.mode, graphRootIds),
+      minZoom: MIN_GRAPH_ZOOM,
+      maxZoom: MAX_GRAPH_ZOOM
     });
+
+    if (positionSnapshot && positionedElements) {
+      restoreGraphViewport(cy, positionSnapshot);
+    }
+    pendingPositionSnapshotRef.current = null;
+
+    let boundedLabelsHidden: boolean | null = null;
+    const syncBoundedLabels = () => {
+      if (!isBoundedView) return;
+      const shouldHide = cy.zoom() < BOUNDED_LABEL_ZOOM_THRESHOLD;
+      if (shouldHide === boundedLabelsHidden) return;
+      boundedLabelsHidden = shouldHide;
+      cy.nodes('[isRoot = 0][hiddenNeighborCount = 0]')
+        .toggleClass('overview-label-hidden', shouldHide);
+    };
+    const syncZoomState = () => {
+      syncBoundedLabels();
+      setGraphZoom(cy.zoom());
+    };
+    cy.on('zoom', syncZoomState);
+    syncZoomState();
 
     // Event handlers
     cy.on('tap', 'node', (evt: EventObject) => {
@@ -311,6 +659,14 @@ export function OntologyGraph() {
       }
     });
 
+    cy.on('mouseover', 'edge', (evt: EventObject) => {
+      evt.target.addClass('hovered');
+    });
+
+    cy.on('mouseout', 'edge', (evt: EventObject) => {
+      evt.target.removeClass('hovered');
+    });
+
     cy.on('tap', (evt: EventObject) => {
       if (evt.target === cy) {
         // Exit focus mode BEFORE clearing selection so the selection effect
@@ -327,6 +683,8 @@ export function OntologyGraph() {
 
     cy.on('dbltap', 'node', (evt: EventObject) => {
       const nodeId = evt.target.id();
+      if (isBoundedView) return;
+
       const alreadyFocused = focusNodeIdRef.current === nodeId;
 
       if (alreadyFocused) {
@@ -345,24 +703,10 @@ export function OntologyGraph() {
     });
 
     cyRef.current = cy;
+    setGraphInstance(cy);
     window.__ONTOLOGY_PREVIEW_CY__ = cy;
     mountedRef.current = true;
-
-    if (!largeGraph) {
-      cy.layout({
-        name: 'fcose',
-        quality: 'proof',
-        randomize: true,
-        animate: false,
-        fit: true,
-        padding: 60,
-        nodeDimensionsIncludeLabels: true,
-        nodeRepulsion: () => 15000,
-        idealEdgeLength: () => 200,
-        edgeElasticity: () => 0.45,
-        nodeSeparation: 100
-      } as unknown as Parameters<Core['layout']>[0]).run();
-    }
+    applySelectionState(cy, isBoundedView);
 
     return () => {
       mountedRef.current = false;
@@ -372,7 +716,16 @@ export function OntologyGraph() {
       cy.destroy();
       cyRef.current = null;
     };
-  }, [buildElements, getCy, largeGraph, selectEntity, selectRelationship]);
+  }, [
+    applySelectionState,
+    buildElements,
+    getCy,
+    graphView.mode,
+    graphRootIds,
+    isBoundedView,
+    selectEntity,
+    selectRelationship,
+  ]);
 
   // Keep focusNodeIdRef in sync with state
   useEffect(() => {
@@ -417,50 +770,14 @@ export function OntologyGraph() {
   useEffect(() => {
     const cy = getCy();
     if (!cy) return;
-
-    // If focus mode is active, let the focus effect manage dimming
-    if (focusNodeIdRef.current !== null) {
-      // Just update selection highlight without touching dimmed
-      try {
-        cy.elements().unselect();
-        if (selectedEntityId) cy.getElementById(selectedEntityId).select();
-        if (selectedRelationshipId) cy.getElementById(selectedRelationshipId).select();
-      } catch { /* ignore */ }
-      return;
-    }
-
-    try {
-      cy.elements().removeClass('highlighted dimmed');
-      cy.elements().unselect();
-
-      if (selectedEntityId) {
-        const node = cy.getElementById(selectedEntityId);
-        node.select();
-        
-        // Highlight connected edges and nodes
-        const connectedEdges = node.connectedEdges();
-        const connectedNodes = connectedEdges.connectedNodes();
-        
-        cy.elements().addClass('dimmed');
-        node.removeClass('dimmed');
-        connectedEdges.removeClass('dimmed');
-        connectedNodes.removeClass('dimmed');
-      }
-
-      if (selectedRelationshipId) {
-        const edge = cy.getElementById(selectedRelationshipId);
-        edge.select();
-        
-        const connectedNodes = edge.connectedNodes();
-        
-        cy.elements().addClass('dimmed');
-        edge.removeClass('dimmed');
-        connectedNodes.removeClass('dimmed');
-      }
-    } catch {
-      // Graph may have been destroyed
-    }
-  }, [selectedEntityId, selectedRelationshipId, getCy]);
+    applySelectionState(cy, isBoundedView);
+  }, [
+    applySelectionState,
+    getCy,
+    isBoundedView,
+    selectedEntityId,
+    selectedRelationshipId,
+  ]);
 
   // Handle highlights from queries
   useEffect(() => {
@@ -488,27 +805,39 @@ export function OntologyGraph() {
     } catch {
       // Graph may have been destroyed
     }
-  }, [highlightedEntities, highlightedRelationships, themeColors, getCy]);
+  }, [
+    getCy,
+    graphView,
+    highlightedEntities,
+    highlightedRelationships,
+    themeColors,
+  ]);
 
   // Graph controls
-  const handleZoomIn = () => {
+  const changeZoom = (delta: number) => {
     const cy = getCy();
-    if (cy) {
-      try {
-        cy.zoom(cy.zoom() * 1.3);
-        cy.center();
-      } catch { /* ignore */ }
-    }
+    if (!cy) return;
+    try {
+      const nextZoom = Math.min(
+        MAX_GRAPH_ZOOM,
+        Math.max(MIN_GRAPH_ZOOM, cy.zoom() + delta),
+      );
+      cy.zoom({
+        level: Number(nextZoom.toFixed(2)),
+        renderedPosition: {
+          x: cy.width() / 2,
+          y: cy.height() / 2,
+        },
+      });
+    } catch { /* ignore */ }
+  };
+
+  const handleZoomIn = () => {
+    changeZoom(GRAPH_ZOOM_STEP);
   };
 
   const handleZoomOut = () => {
-    const cy = getCy();
-    if (cy) {
-      try {
-        cy.zoom(cy.zoom() / 1.3);
-        cy.center();
-      } catch { /* ignore */ }
-    }
+    changeZoom(-GRAPH_ZOOM_STEP);
   };
 
   const handleFit = () => {
@@ -524,29 +853,128 @@ export function OntologyGraph() {
     const cy = getCy();
     if (cy) {
       try {
-         
-        cy.layout((largeGraph
-          ? {
-              name: 'grid',
-              animate: false,
-              fit: true,
-              padding: 30,
-            }
-          : {
-              name: 'fcose',
-              quality: 'proof',
-              randomize: true,
-              animate: true,
-              animationDuration: 500,
-              fit: true,
-              padding: 60,
-              nodeDimensionsIncludeLabels: true,
-              nodeRepulsion: () => 15000,
-              idealEdgeLength: () => 200,
-              nodeSeparation: 100
-            }) as unknown as Parameters<Core['layout']>[0]).run();
+        cy.layout(
+          graphLayoutOptions(
+            graphView.mode,
+            graphRootIds,
+          ) as Parameters<Core['layout']>[0],
+        ).run();
       } catch { /* ignore */ }
     }
+  };
+
+  const handleLargeSearch = () => {
+    pendingPositionSnapshotRef.current = null;
+    skipNextProjectionSnapshotRef.current = true;
+    setLargeSearch(largeSearchInput.trim());
+    setExpandedNodeIds(new Set());
+    selectEntity(null);
+    selectRelationship(null);
+    clearHighlights();
+  };
+
+  const handleShowOverview = () => {
+    pendingPositionSnapshotRef.current = null;
+    skipNextProjectionSnapshotRef.current = true;
+    setLargeSearchInput('');
+    setLargeSearch('');
+    setLargeDepth(DEFAULT_LARGE_GRAPH_DEPTH);
+    setExpandedNodeIds(new Set());
+    selectEntity(null);
+    selectRelationship(null);
+    clearHighlights();
+  };
+
+  const clearSelectionOutsideView = (
+    nextView: ReturnType<typeof createGraphView>,
+  ) => {
+    const nextEntityIds = new Set(
+      nextView.entities.map(({ id }) => id),
+    );
+    const nextRelationshipIds = new Set(
+      nextView.relationships.map(({ id }) => id),
+    );
+
+    if (selectedEntityId && !nextEntityIds.has(selectedEntityId)) {
+      selectEntity(null);
+    }
+    if (
+      selectedRelationshipId
+      && !nextRelationshipIds.has(selectedRelationshipId)
+    ) {
+      selectRelationship(null);
+    }
+  };
+
+  const handleLargeDepthChange = (nextDepth: number) => {
+    if (nextDepth === largeDepth) return;
+    preserveCurrentGraphPosition();
+    const ontologyEntityIds = new Set(
+      currentOntology.entityTypes.map(({ id }) => id),
+    );
+    const ontologyRelationshipIds = new Set(
+      currentOntology.relationships.map(({ id }) => id),
+    );
+    const retainedHighlightedEntities = highlightedEntities.filter(
+      (id) => ontologyEntityIds.has(id),
+    );
+    const retainedHighlightedRelationships = highlightedRelationships.filter(
+      (id) => ontologyRelationshipIds.has(id),
+    );
+
+    setExpandedNodeIds(new Set());
+    selectedGraphItemRef.current = {
+      entityId: null,
+      relationshipId: null,
+    };
+    focusNodeIdRef.current = null;
+    selectEntity(null);
+    selectRelationship(null);
+    setFocusNodeId(null);
+    if (
+      retainedHighlightedEntities.length !== highlightedEntities.length
+      || retainedHighlightedRelationships.length
+        !== highlightedRelationships.length
+    ) {
+      setHighlights(
+        retainedHighlightedEntities,
+        retainedHighlightedRelationships,
+      );
+    }
+    setLargeDepth(nextDepth);
+  };
+
+  const handleExpandSelectedEntity = () => {
+    if (
+      !selectedOverviewEntity
+      || selectedOverviewEntity.hiddenNeighborCount === 0
+      || selectedOverviewEntity.isExpanded
+      || !selectedOverviewEntity.canExpand
+    ) {
+      return;
+    }
+
+    preserveCurrentGraphPosition(selectedOverviewEntity.id);
+    setExpandedNodeIds((current) => {
+      if (current.has(selectedOverviewEntity.id)) return current;
+      return new Set(current).add(selectedOverviewEntity.id);
+    });
+  };
+
+  const handleCollapseSelectedEntity = () => {
+    if (!selectedOverviewEntity?.isExpanded) return;
+
+    preserveCurrentGraphPosition(selectedOverviewEntity.id);
+    const nextExpandedNodeIds = new Set(expandedNodeIds);
+    nextExpandedNodeIds.delete(selectedOverviewEntity.id);
+    const nextView = createGraphView(currentOntology, {
+      search: largeSearch,
+      depth: largeDepth,
+      expandedNodeIds: nextExpandedNodeIds,
+    });
+
+    setExpandedNodeIds(nextExpandedNodeIds);
+    clearSelectionOutsideView(nextView);
   };
 
   const handleDownload = () => {
@@ -564,17 +992,68 @@ export function OntologyGraph() {
     } catch { /* ignore */ }
   };
 
+  const legendLimit = isBoundedView ? 8 : 100;
+  const legendEntities = graphView.entities.slice(0, legendLimit);
+  const hiddenLegendCount = graphView.entities.length - legendEntities.length;
+  const canResetLargeView = (
+    largeSearch !== ''
+    || largeDepth !== DEFAULT_LARGE_GRAPH_DEPTH
+    || expandedNodeIds.size > 0
+    || selectedEntityId !== null
+    || selectedRelationshipId !== null
+    || highlightedEntities.length > 0
+    || highlightedRelationships.length > 0
+  );
+
   return (
     <div className="graph-container">
       <div ref={containerRef} className="graph-canvas" data-testid="ontology-graph-canvas" />
 
-      {largeGraph && (
-        <div className="graph-scale-badge">
-          Large ontology: using the fast grid layout
-        </div>
+      {isBoundedView && (
+        <LargeGraphControls
+          graphView={graphView}
+          totalNodeCount={currentOntology.entityTypes.length}
+          totalEdgeCount={currentOntology.relationships.length}
+          searchInput={largeSearchInput}
+          appliedSearch={largeSearch}
+          depth={largeDepth}
+          maxDepth={maxLargeDepth}
+          canReset={canResetLargeView}
+          selectedEntity={selectedOverviewEntity}
+          onSearchInputChange={setLargeSearchInput}
+          onSearch={handleLargeSearch}
+          onDepthChange={handleLargeDepthChange}
+          onExpandSelectedEntity={handleExpandSelectedEntity}
+          onCollapseSelectedEntity={handleCollapseSelectedEntity}
+          onShowOverview={handleShowOverview}
+        />
       )}
 
-      {focusNodeId && (
+      {neighborActionPosition && selectedOverviewEntity && (
+        <button
+          type="button"
+          className={`graph-neighbor-action graph-neighbor-action--${neighborActionPosition.placement}`}
+          style={{
+            left: neighborActionPosition.left,
+            top: neighborActionPosition.top,
+          }}
+          aria-label={`Expand ${selectedOverviewEntity.name} to show ${
+            selectedOverviewEntity.hiddenNeighborCount
+          } hidden ${
+            selectedOverviewEntity.hiddenNeighborCount === 1
+              ? 'neighbor'
+              : 'neighbors'
+          }`}
+          onClick={handleExpandSelectedEntity}
+        >
+          Show {selectedOverviewEntity.hiddenNeighborCount.toLocaleString()}{' '}
+          {selectedOverviewEntity.hiddenNeighborCount === 1
+            ? 'neighbor'
+            : 'neighbors'}
+        </button>
+      )}
+
+      {focusNodeId && !isBoundedView && (
         <div className="graph-focus-badge">
           <Crosshair size={13} />
           <span>Focus mode</span>
@@ -592,10 +1071,20 @@ export function OntologyGraph() {
       )}
       
       <div className="graph-controls">
-        <button className="graph-control-btn" onClick={handleZoomIn} title="Zoom In">
+        <button
+          className="graph-control-btn"
+          onClick={handleZoomIn}
+          title="Zoom In"
+          disabled={graphZoom >= MAX_GRAPH_ZOOM - 0.001}
+        >
           <ZoomIn size={18} />
         </button>
-        <button className="graph-control-btn" onClick={handleZoomOut} title="Zoom Out">
+        <button
+          className="graph-control-btn"
+          onClick={handleZoomOut}
+          title="Zoom Out"
+          disabled={graphZoom <= MIN_GRAPH_ZOOM + 0.001}
+        >
           <ZoomOut size={18} />
         </button>
         <button className="graph-control-btn" onClick={handleFit} title="Fit to View">
@@ -609,20 +1098,22 @@ export function OntologyGraph() {
         </button>
       </div>
 
-      <div className="graph-legend">
-        <div className="legend-title">Entity Types</div>
-        {legendEntities.items.map(entity => (
-          <div key={entity.id} className="legend-item">
-            <div className="legend-dot" style={{ backgroundColor: entity.color }} />
-            <span>{entity.icon} {entity.name}</span>
-          </div>
-        ))}
-        {legendEntities.hiddenCount > 0 && (
-          <div className="legend-item">
-            <span>+ {legendEntities.hiddenCount} more — use Search &amp; Filter</span>
-          </div>
-        )}
-      </div>
+      {!isBoundedView && (
+        <div className="graph-legend">
+          <div className="legend-title">Entity Types</div>
+          {legendEntities.map(entity => (
+            <div key={entity.id} className="legend-item">
+              <div className="legend-dot" style={{ backgroundColor: entity.color }} />
+              <span>{entity.icon} {entity.name}</span>
+            </div>
+          ))}
+          {hiddenLegendCount > 0 && (
+            <div className="legend-item">
+              <span>+ {hiddenLegendCount} more visible in the graph</span>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
