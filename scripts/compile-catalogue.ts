@@ -33,6 +33,8 @@ import type {
   CatalogueEntry,
   Catalogue,
   CatalogueEntryPayload,
+  CataloguePayloadManifest,
+  CataloguePayloadManifestEntry,
 } from '../src/types/catalogue.js';
 
 // Provide DOMParser for the RDF parser (browser API not available in Node)
@@ -44,6 +46,7 @@ const CATALOGUE_DIR = join(ROOT, 'catalogue');
 const OUTPUT_PATH = join(ROOT, 'public', 'catalogue.json');
 const CATALOGUE_TIERS = ['official', 'community', 'external'] as const;
 const PAYLOAD_DIR = join(ROOT, 'public', 'catalogue-payloads');
+const PAYLOAD_MANIFEST_FILENAME = 'catalogue-payloads-manifest.json';
 
 // ------------------------------------------------------------------
 // Types
@@ -623,6 +626,57 @@ export function compileCatalogue(
   return compileCatalogueArtifacts(catalogueDir, dependencies).catalogue;
 }
 
+function collectPublishedPayloads(
+  payloadDirectory: string,
+  directory: string = payloadDirectory,
+  prefix = '',
+): CataloguePayloadManifestEntry[] {
+  const payloads: CataloguePayloadManifestEntry[] = [];
+  const entries = readdirSync(directory, { withFileTypes: true })
+    .sort((left, right) => left.name.localeCompare(right.name));
+
+  for (const entry of entries) {
+    const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
+    const entryPath = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      if (!/^[a-z0-9][a-z0-9_-]*$/.test(entry.name)) {
+        throw new Error(
+          `Unsafe catalogue payload directory: ${relativePath}`,
+        );
+      }
+      payloads.push(...collectPublishedPayloads(
+        payloadDirectory,
+        entryPath,
+        relativePath,
+      ));
+      continue;
+    }
+    if (!entry.isFile()) {
+      throw new Error(`Unsupported catalogue payload path: ${relativePath}`);
+    }
+
+    const match = relativePath.match(
+      /^(?:[a-z0-9][a-z0-9_-]*\/)+([a-f0-9]{64})\.json$/,
+    );
+    if (!match) {
+      throw new Error(`Invalid catalogue payload path: ${relativePath}`);
+    }
+    const content = readFileSync(entryPath, 'utf-8');
+    const actualHash = createHash('sha256').update(content).digest('hex');
+    if (actualHash !== match[1]) {
+      throw new Error(
+        `Catalogue payload hash does not match its path: ${relativePath}`,
+      );
+    }
+    payloads.push({
+      payloadUrl: `catalogue-payloads/${relativePath}`,
+      payloadHash: `sha256:${actualHash}`,
+    });
+  }
+
+  return payloads;
+}
+
 export function runCatalogueCompiler(
   catalogueDir: string = CATALOGUE_DIR,
   outputPath: string = OUTPUT_PATH,
@@ -635,7 +689,9 @@ export function runCatalogueCompiler(
   const payloadDirectory = outputPath === OUTPUT_PATH
     ? PAYLOAD_DIR
     : join(dirname(outputPath), 'catalogue-payloads');
+  const manifestPath = join(dirname(outputPath), PAYLOAD_MANIFEST_FILENAME);
   const indexTemporaryPath = `${outputPath}.tmp-${process.pid}`;
+  const manifestTemporaryPath = `${manifestPath}.tmp-${process.pid}`;
   const temporaryPayloadPaths: string[] = [];
 
   try {
@@ -656,6 +712,18 @@ export function runCatalogueCompiler(
       renameSync(temporaryPath, payloadPath);
     }
 
+    const manifest: CataloguePayloadManifest = {
+      schemaVersion: 1,
+      payloads: collectPublishedPayloads(payloadDirectory),
+    };
+    rmSync(manifestTemporaryPath, { force: true });
+    writeFileSync(
+      manifestTemporaryPath,
+      JSON.stringify(manifest, null, 2) + '\n',
+      'utf-8',
+    );
+    renameSync(manifestTemporaryPath, manifestPath);
+
     rmSync(indexTemporaryPath, { force: true });
     writeFileSync(
       indexTemporaryPath,
@@ -665,6 +733,7 @@ export function runCatalogueCompiler(
     renameSync(indexTemporaryPath, outputPath);
   } catch (error) {
     rmSync(indexTemporaryPath, { force: true });
+    rmSync(manifestTemporaryPath, { force: true });
     for (const temporaryPath of temporaryPayloadPaths) {
       rmSync(temporaryPath, { force: true });
     }

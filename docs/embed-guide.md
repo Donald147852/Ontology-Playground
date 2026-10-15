@@ -127,6 +127,12 @@ Encode your ontology JSON as base64 and pass it directly:
 | `data-theme` | No | `dark` | Color theme: `dark` or `light` |
 | `data-height` | No | `500px` | Widget height (any CSS value) |
 
+When publishing a new self-hosted catalogue version, retain the existing
+`catalogue-payloads/` files and add the newly generated payloads before
+replacing `catalogue.json`. Payload files are immutable and content-addressed;
+keeping prior hashes prevents open pages with an older index from breaking
+during a deployment.
+
 ## Dynamic Mounting
 
 If you add embed containers after page load (e.g., in a SPA), call:

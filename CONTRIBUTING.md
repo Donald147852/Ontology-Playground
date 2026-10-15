@@ -75,8 +75,14 @@ The easiest way to contribute is to add an ontology to the community catalogue:
    npm test                  # all tests must pass
    ```
    The compiler writes card metadata to `public/catalogue.json` and writes each
-   graph to a content-addressed file under `public/catalogue-payloads/`. These
-   generated files are ignored by Git; the production build publishes both.
+   graph to a content-addressed file under `public/catalogue-payloads/`. It
+   records every retained hash in `public/catalogue-payloads-manifest.json`.
+   These generated files are ignored by Git; the production build publishes
+   all three artifacts.
+   Deployment jobs must restore the previously published payload directory
+   before compiling and preserve the merged directory afterward. Payloads are
+   immutable, and keeping prior hashes lets open tabs finish requests against
+   an older catalogue index.
 5. **Open a Pull Request** against the `main` branch
    - CI will automatically validate your RDF and metadata
    - A maintainer will review and merge

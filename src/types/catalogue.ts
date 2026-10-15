@@ -25,6 +25,16 @@ export interface CatalogueEntryPayload {
   bindings: DataBinding[];
 }
 
+export interface CataloguePayloadManifestEntry {
+  payloadUrl: string;
+  payloadHash: string;
+}
+
+export interface CataloguePayloadManifest {
+  schemaVersion: 1;
+  payloads: CataloguePayloadManifestEntry[];
+}
+
 export interface LoadedCatalogueEntry extends CatalogueEntry {
   ontology: Ontology;
   bindings: DataBinding[];

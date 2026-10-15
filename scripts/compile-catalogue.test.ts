@@ -25,6 +25,11 @@ import {
 
 const ROOT = join(import.meta.dirname, '..');
 const CATALOGUE_JSON = join(ROOT, 'public', 'catalogue.json');
+const PAYLOAD_MANIFEST_JSON = join(
+  ROOT,
+  'public',
+  'catalogue-payloads-manifest.json',
+);
 const COMMUNITY_DIR = join(ROOT, 'catalogue', 'community');
 
 interface CatalogueTestEntry {
@@ -229,6 +234,24 @@ describe('catalogue compilation (end-to-end)', () => {
     }
   });
 
+  it('payload manifest covers every current content-addressed payload', () => {
+    const catalogue = readCatalogue();
+    const manifest = JSON.parse(
+      readFileSync(PAYLOAD_MANIFEST_JSON, 'utf-8'),
+    ) as {
+      schemaVersion: number;
+      payloads: { payloadUrl: string; payloadHash: string }[];
+    };
+    const manifestEntries = new Map(
+      manifest.payloads.map((entry) => [entry.payloadUrl, entry.payloadHash]),
+    );
+
+    expect(manifest.schemaVersion).toBe(1);
+    for (const entry of catalogue.entries) {
+      expect(manifestEntries.get(entry.payloadUrl)).toBe(entry.payloadHash);
+    }
+  });
+
   it('cosmic-coffee entry preserves data bindings', () => {
     const coffee = findEntry('official/cosmic-coffee');
     const payload = readPayload(coffee);
@@ -254,28 +277,73 @@ describe('catalogue compilation (end-to-end)', () => {
     );
     temporaryDirectories.push(outputRoot);
     const outputPath = join(outputRoot, 'catalogue.json');
+    const legacyContent = 'previous payload\n';
+    const legacyHash = createHash('sha256')
+      .update(legacyContent)
+      .digest('hex');
     const legacyPayloadPath = join(
       outputRoot,
       'catalogue-payloads',
       'official',
       'legacy',
-      'previous-hash.json',
+      `${legacyHash}.json`,
     );
     mkdirSync(dirname(legacyPayloadPath), { recursive: true });
-    writeFileSync(legacyPayloadPath, 'previous payload\n');
+    writeFileSync(legacyPayloadPath, legacyContent);
     writeFileSync(outputPath, 'previous index\n');
 
     runCatalogueCompiler(catalogueRoot, outputPath);
 
     expect(readFileSync(legacyPayloadPath, 'utf-8')).toBe(
-      'previous payload\n',
+      legacyContent,
     );
+    expect(JSON.parse(readFileSync(
+      join(outputRoot, 'catalogue-payloads-manifest.json'),
+      'utf-8',
+    ))).toMatchObject({
+      schemaVersion: 1,
+      payloads: [{
+        payloadUrl:
+          `catalogue-payloads/official/legacy/${legacyHash}.json`,
+        payloadHash: `sha256:${legacyHash}`,
+      }],
+    });
     expect(JSON.parse(readFileSync(outputPath, 'utf-8'))).toMatchObject({
       schemaVersion: 2,
       count: 0,
       entries: [],
     });
     expect(existsSync(`${outputPath}.tmp-${process.pid}`)).toBe(false);
+  });
+
+  it('restores payload history before the production deployment build', () => {
+    const workflow = readFileSync(
+      join(ROOT, '.github', 'workflows', 'deploy-ghpages.yml'),
+      'utf-8',
+    );
+    const restoreStep = workflow.indexOf(
+      'name: Restore published catalogue payloads',
+    );
+    const compileStep = workflow.indexOf('run: npm run catalogue:build');
+    const buildStep = workflow.indexOf('name: Build');
+    const saveStep = workflow.indexOf(
+      'name: Preserve published catalogue payloads',
+    );
+    const uploadStep = workflow.indexOf('actions/upload-pages-artifact@');
+
+    expect(restoreStep).toBeGreaterThan(-1);
+    expect(restoreStep).toBeLessThan(compileStep);
+    expect(workflow.indexOf(
+      'name: Restore payload history from current deployment',
+    )).toBeLessThan(compileStep);
+    expect(saveStep).toBeGreaterThan(buildStep);
+    expect(saveStep).toBeLessThan(uploadStep);
+    expect(
+      workflow.match(/^\s+public\/catalogue-payloads$/gm),
+    ).toHaveLength(2);
+    expect(
+      workflow.match(/key: catalogue-payloads-\$\{\{ github\.run_id \}\}/g),
+    ).toHaveLength(2);
   });
 });
 
