@@ -53,14 +53,42 @@ cytoscape.use(fcose);
 declare global {
   interface Window {
     __ONTOLOGY_PREVIEW_CY__?: Core;
+    __ONTOLOGY_GRAPH_METRICS__?: OntologyGraphMetrics;
+    __ONTOLOGY_GRAPH_PERFORMANCE_ENABLED__?: boolean;
+    __ONTOLOGY_GRAPH_LAYOUT_DELAY_MS__?: number;
   }
 }
 
 type GraphColors = { nodeText: string; edgeColor: string; edgeText: string; edgeLabelBg: string };
+type LayoutStatus = 'idle' | 'scheduled' | 'running' | 'cancelled' | 'error';
+
+export interface OntologyGraphMetrics {
+  ontologyName: string;
+  mode: GraphViewMode;
+  totalNodeCount: number;
+  totalEdgeCount: number;
+  renderedNodeCount: number;
+  renderedEdgeCount: number;
+  layoutCount: number;
+  lastLayoutDurationMs: number;
+  maxLongTaskDurationMs: number;
+  retainedHeapBytes: number | null;
+  status: LayoutStatus;
+}
 
 const MIN_GRAPH_ZOOM = 0.3;
 const MAX_GRAPH_ZOOM = 3;
 const GRAPH_ZOOM_STEP = 0.3;
+const DEFAULT_BOUNDED_LAYOUT_DELAY_MS = 50;
+const EMPTY_EXPANDED_NODE_IDS = new Set<string>();
+
+function retainedHeapBytes(): number | null {
+  return (
+    performance as Performance & {
+      memory?: { usedJSHeapSize?: number };
+    }
+  ).memory?.usedJSHeapSize ?? null;
+}
 
 function graphLayoutOptions(
   mode: GraphViewMode,
@@ -125,17 +153,28 @@ export function OntologyGraph() {
   const mountedRef = useRef(true);
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
   const focusNodeIdRef = useRef<string | null>(null);
-  const [largeSearchInput, setLargeSearchInput] = useState('');
-  const [largeSearch, setLargeSearch] = useState('');
-  const [largeDepth, setLargeDepth] = useState(DEFAULT_LARGE_GRAPH_DEPTH);
-  const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(
-    () => new Set(),
+  const [storedLargeSearchInput, setLargeSearchInput] = useState('');
+  const [storedLargeSearch, setLargeSearch] = useState('');
+  const [storedLargeDepth, setLargeDepth] = useState(
+    DEFAULT_LARGE_GRAPH_DEPTH,
+  );
+  const [storedExpandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(
+    EMPTY_EXPANDED_NODE_IDS,
   );
   const [graphZoom, setGraphZoom] = useState(MIN_GRAPH_ZOOM);
   const [isExportingPng, setIsExportingPng] = useState(false);
   const [pngExportError, setPngExportError] = useState<string | null>(null);
+  const [layoutStatus, setLayoutStatus] = useState<LayoutStatus>('idle');
+  const [layoutError, setLayoutError] = useState<string | null>(null);
+  const [storedLayoutPaused, setLayoutPaused] = useState(false);
+  const [layoutRetry, setLayoutRetry] = useState(0);
+  const [layoutRunVersion, setLayoutRunVersion] = useState(0);
   const pendingPositionSnapshotRef = useRef<GraphPositionSnapshot | null>(null);
   const skipNextProjectionSnapshotRef = useRef(false);
+  const scheduledGraphViewRef = useRef<ReturnType<
+    typeof createGraphView
+  > | null>(null);
+  const metricsOntologyRef = useRef<unknown>(null);
   
   // Helper to safely get cytoscape instance - returns null if destroyed
   const getCy = useCallback(() => {
@@ -173,16 +212,39 @@ export function OntologyGraph() {
     darkMode,
     theme
   } = useAppStore();
+  const largeViewOntologyRef = useRef(currentOntology);
+  const largeViewMatchesOntology = (
+    largeViewOntologyRef.current === currentOntology
+  );
+  const largeSearchInput = largeViewMatchesOntology
+    ? storedLargeSearchInput
+    : '';
+  const largeSearch = largeViewMatchesOntology ? storedLargeSearch : '';
+  const largeDepth = largeViewMatchesOntology
+    ? storedLargeDepth
+    : DEFAULT_LARGE_GRAPH_DEPTH;
+  const expandedNodeIds = largeViewMatchesOntology
+    ? storedExpandedNodeIds
+    : EMPTY_EXPANDED_NODE_IDS;
+  const layoutPaused = largeViewMatchesOntology
+    ? storedLayoutPaused
+    : false;
   const selectedGraphItemRef = useRef({
     entityId: selectedEntityId,
     relationshipId: selectedRelationshipId,
   });
+  const highlightedEntitiesRef = useRef(highlightedEntities);
+  const highlightedRelationshipsRef = useRef(highlightedRelationships);
   useEffect(() => {
     selectedGraphItemRef.current = {
       entityId: selectedEntityId,
       relationshipId: selectedRelationshipId,
     };
   }, [selectedEntityId, selectedRelationshipId]);
+  useEffect(() => {
+    highlightedEntitiesRef.current = highlightedEntities;
+    highlightedRelationshipsRef.current = highlightedRelationships;
+  }, [highlightedEntities, highlightedRelationships]);
 
   const applySelectionState = useCallback((
     cy: Core,
@@ -334,7 +396,6 @@ export function OntologyGraph() {
     if (visibleRootIds.length > 0) return visibleRootIds;
     return graphView.entities[0] ? [graphView.entities[0].id] : [];
   }, [graphView.entities, graphView.rootIds]);
-  const graphOntologyRef = useRef(currentOntology);
   const previousProjectionRef = useRef({
     ontology: currentOntology,
     graphView,
@@ -363,13 +424,15 @@ export function OntologyGraph() {
   }, [currentOntology, graphView, preserveCurrentGraphPosition]);
 
   useEffect(() => {
-    if (graphOntologyRef.current === currentOntology) return;
-    graphOntologyRef.current = currentOntology;
+    if (largeViewOntologyRef.current === currentOntology) return;
+    largeViewOntologyRef.current = currentOntology;
     skipNextProjectionSnapshotRef.current = true;
     setLargeSearchInput('');
     setLargeSearch('');
     setLargeDepth(DEFAULT_LARGE_GRAPH_DEPTH);
-    setExpandedNodeIds(new Set());
+    setExpandedNodeIds(EMPTY_EXPANDED_NODE_IDS);
+    setLayoutPaused(false);
+    setLayoutError(null);
     setFocusNodeId(null);
     pendingPositionSnapshotRef.current = null;
   }, [currentOntology]);
@@ -437,11 +500,114 @@ export function OntologyGraph() {
     return [...nodes, ...edges];
   }, [graphView]);
 
+  const updateLayoutStatus = useCallback((status: LayoutStatus) => {
+    setLayoutStatus(status);
+    const metrics = window.__ONTOLOGY_GRAPH_METRICS__;
+    if (
+      metrics
+      && metricsOntologyRef.current === currentOntology
+    ) {
+      metrics.status = status;
+    }
+  }, [currentOntology]);
+
+  useEffect(() => {
+    if (!window.__ONTOLOGY_GRAPH_PERFORMANCE_ENABLED__) return;
+
+    const initialGraphView = createGraphView(currentOntology);
+    metricsOntologyRef.current = currentOntology;
+    window.__ONTOLOGY_GRAPH_METRICS__ = {
+      ontologyName: currentOntology.name,
+      mode: initialGraphView.mode,
+      totalNodeCount: currentOntology.entityTypes.length,
+      totalEdgeCount: currentOntology.relationships.length,
+      renderedNodeCount: initialGraphView.visibleNodeCount,
+      renderedEdgeCount: initialGraphView.visibleEdgeCount,
+      layoutCount: 0,
+      lastLayoutDurationMs: 0,
+      maxLongTaskDurationMs: 0,
+      retainedHeapBytes: retainedHeapBytes(),
+      status: 'idle',
+    };
+
+    let observer: PerformanceObserver | null = null;
+    if (
+      typeof PerformanceObserver !== 'undefined'
+      && PerformanceObserver.supportedEntryTypes?.includes('longtask')
+    ) {
+      observer = new PerformanceObserver((list) => {
+        const metrics = window.__ONTOLOGY_GRAPH_METRICS__;
+        if (
+          !metrics
+          || metricsOntologyRef.current !== currentOntology
+        ) {
+          return;
+        }
+        for (const entry of list.getEntries()) {
+          metrics.maxLongTaskDurationMs = Math.max(
+            metrics.maxLongTaskDurationMs,
+            entry.duration,
+          );
+        }
+      });
+      observer.observe({ type: 'longtask', buffered: false });
+    }
+
+    return () => observer?.disconnect();
+  }, [currentOntology]);
+
+  useEffect(() => {
+    scheduledGraphViewRef.current = null;
+
+    if (!isBoundedView) {
+      scheduledGraphViewRef.current = graphView;
+      updateLayoutStatus('running');
+      return;
+    }
+    if (layoutPaused) {
+      updateLayoutStatus('cancelled');
+      return;
+    }
+
+    updateLayoutStatus('scheduled');
+    const configuredDelay = window.__ONTOLOGY_GRAPH_LAYOUT_DELAY_MS__;
+    const delay = typeof configuredDelay === 'number'
+      && Number.isFinite(configuredDelay)
+      && configuredDelay >= 0
+      ? Math.min(configuredDelay, 5_000)
+      : DEFAULT_BOUNDED_LAYOUT_DELAY_MS;
+    const timer = window.setTimeout(() => {
+      scheduledGraphViewRef.current = graphView;
+      updateLayoutStatus('running');
+      setLayoutRunVersion((version) => version + 1);
+    }, delay);
+
+    return () => {
+      window.clearTimeout(timer);
+      if (scheduledGraphViewRef.current === graphView) {
+        scheduledGraphViewRef.current = null;
+      }
+    };
+  }, [
+    graphView,
+    isBoundedView,
+    layoutPaused,
+    layoutRetry,
+    updateLayoutStatus,
+  ]);
+
   // Initialize Cytoscape
   useEffect(() => {
     if (!containerRef.current) return;
+    if (scheduledGraphViewRef.current !== graphView) return;
 
-    const baseElements = buildElements();
+    mountedRef.current = true;
+    const layoutStartedAt = performance.now();
+    let retainedHeapTimer: number | undefined;
+    let createdCy: Core | null = null;
+
+    try {
+      const baseElements = buildElements();
     const positionSnapshot = isBoundedView
       ? pendingPositionSnapshotRef.current
       : null;
@@ -622,6 +788,7 @@ export function OntologyGraph() {
       minZoom: MIN_GRAPH_ZOOM,
       maxZoom: MAX_GRAPH_ZOOM
     });
+    createdCy = cy;
 
     if (positionSnapshot && positionedElements) {
       restoreGraphViewport(cy, positionSnapshot);
@@ -723,24 +890,78 @@ export function OntologyGraph() {
     window.__ONTOLOGY_PREVIEW_CY__ = cy;
     mountedRef.current = true;
     applySelectionState(cy, isBoundedView);
+    for (const id of highlightedEntitiesRef.current) {
+      cy.getElementById(id).addClass('highlighted');
+    }
+    for (const id of highlightedRelationshipsRef.current) {
+      cy.getElementById(id)
+        .addClass('highlighted')
+        .style({
+          'line-color': '#FFB900',
+          'target-arrow-color': '#FFB900',
+        });
+    }
+
+    const metrics = window.__ONTOLOGY_GRAPH_METRICS__;
+    if (
+      metrics
+      && metricsOntologyRef.current === currentOntology
+    ) {
+      metrics.mode = graphView.mode;
+      metrics.renderedNodeCount = graphView.visibleNodeCount;
+      metrics.renderedEdgeCount = graphView.visibleEdgeCount;
+      metrics.layoutCount += 1;
+      metrics.lastLayoutDurationMs = performance.now() - layoutStartedAt;
+      metrics.retainedHeapBytes = retainedHeapBytes();
+    }
+    updateLayoutStatus('idle');
+    retainedHeapTimer = window.setTimeout(() => {
+      const settledMetrics = window.__ONTOLOGY_GRAPH_METRICS__;
+      if (
+        settledMetrics
+        && metricsOntologyRef.current === currentOntology
+      ) {
+        settledMetrics.retainedHeapBytes = retainedHeapBytes();
+      }
+    }, 500);
 
     return () => {
       mountedRef.current = false;
+      window.clearTimeout(retainedHeapTimer);
       if (window.__ONTOLOGY_PREVIEW_CY__ === cy) {
         delete window.__ONTOLOGY_PREVIEW_CY__;
       }
       cy.destroy();
       cyRef.current = null;
     };
+    } catch (error) {
+      window.clearTimeout(retainedHeapTimer);
+      createdCy?.destroy();
+      if (cyRef.current === createdCy) {
+        cyRef.current = null;
+      }
+      setGraphInstance(null);
+      if (window.__ONTOLOGY_PREVIEW_CY__ === createdCy) {
+        delete window.__ONTOLOGY_PREVIEW_CY__;
+      }
+      const message = error instanceof Error
+        ? error.message
+        : 'The graph could not be rendered';
+      setLayoutError(message);
+      updateLayoutStatus('error');
+    }
   }, [
     applySelectionState,
     buildElements,
+    currentOntology,
     getCy,
-    graphView.mode,
+    graphView,
     graphRootIds,
     isBoundedView,
+    layoutRunVersion,
     selectEntity,
     selectRelationship,
+    updateLayoutStatus,
   ]);
 
   // Keep focusNodeIdRef in sync with state
@@ -869,14 +1090,34 @@ export function OntologyGraph() {
     const cy = getCy();
     if (cy) {
       try {
+        const startedAt = performance.now();
         cy.layout(
           graphLayoutOptions(
             graphView.mode,
             graphRootIds,
           ) as Parameters<Core['layout']>[0],
         ).run();
+        const metrics = window.__ONTOLOGY_GRAPH_METRICS__;
+        if (
+          metrics
+          && metricsOntologyRef.current === currentOntology
+        ) {
+          metrics.layoutCount += 1;
+          metrics.lastLayoutDurationMs = performance.now() - startedAt;
+          metrics.retainedHeapBytes = retainedHeapBytes();
+        }
       } catch { /* ignore */ }
     }
+  };
+
+  const handleCancelLayout = () => {
+    setLayoutPaused(true);
+  };
+
+  const handleResumeLayout = () => {
+    setLayoutError(null);
+    setLayoutPaused(false);
+    setLayoutRetry((retry) => retry + 1);
   };
 
   const handleLargeSearch = () => {
@@ -1099,6 +1340,46 @@ export function OntologyGraph() {
             ? 'neighbor'
             : 'neighbors'}
         </button>
+      )}
+
+      {layoutStatus !== 'idle' && (
+        <div
+          className="graph-layout-status"
+          role={layoutStatus === 'error' ? 'alert' : 'status'}
+          aria-live={layoutStatus === 'error' ? 'assertive' : 'polite'}
+        >
+          {layoutStatus === 'error' ? (
+            <>
+              <strong>Graph rendering failed</strong>
+              <span>{layoutError}</span>
+              <button type="button" onClick={handleResumeLayout}>
+                Try again
+              </button>
+            </>
+          ) : layoutStatus === 'cancelled' ? (
+            <>
+              <strong>Rendering paused</strong>
+              <span>The bounded graph was not rendered.</span>
+              <button type="button" onClick={handleResumeLayout}>
+                Resume rendering
+              </button>
+            </>
+          ) : (
+            <>
+              <strong>
+                {layoutStatus === 'scheduled'
+                  ? 'Preparing bounded graph'
+                  : 'Laying out bounded graph'}
+              </strong>
+              <span>
+                Navigation and size-aware controls remain available.
+              </span>
+              <button type="button" onClick={handleCancelLayout}>
+                Cancel rendering
+              </button>
+            </>
+          )}
+        </div>
       )}
 
       {focusNodeId && !isBoundedView && (
