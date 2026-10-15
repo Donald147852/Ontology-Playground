@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Ontology, Relationship } from '../data/ontology';
 import {
   createGraphView,
+  LARGE_GRAPH_LONG_TASK_BUDGET_MS,
+  LARGE_GRAPH_RETAINED_HEAP_BUDGET_BYTES,
   MAX_RENDERED_EDGES,
   MAX_RENDERED_NODES,
 } from '../lib/graphView';
@@ -53,6 +55,31 @@ const graphMocks = vi.hoisted(() => {
     })),
   });
 
+  let autoCompleteLayout = true;
+  let layoutStopHandler: (() => void) | null = null;
+  const emitLayoutStop = () => {
+    const handler = layoutStopHandler;
+    layoutStopHandler = null;
+    handler?.();
+  };
+  const layout = {
+    one: vi.fn((eventName: string, handler: () => void) => {
+      if (eventName === 'layoutstop') {
+        layoutStopHandler = handler;
+      }
+      return layout;
+    }),
+    run: vi.fn(() => {
+      if (autoCompleteLayout) {
+        emitLayoutStop();
+      }
+      return layout;
+    }),
+    stop: vi.fn(() => {
+      emitLayoutStop();
+      return layout;
+    }),
+  };
   const cy = {
     on: vi.fn(),
     off: vi.fn(),
@@ -64,7 +91,7 @@ const graphMocks = vi.hoisted(() => {
     nodes: vi.fn(() => collection),
     $: vi.fn(() => collection),
     getElementById: vi.fn(() => collection),
-    layout: vi.fn(() => ({ run: vi.fn() })),
+    layout: vi.fn(() => layout),
     zoom: vi.fn(() => 1),
     pan: vi.fn(() => ({ x: 123, y: 77 })),
     width: vi.fn(() => 800),
@@ -78,7 +105,20 @@ const graphMocks = vi.hoisted(() => {
     }),
   };
   const cytoscape = vi.fn(() => cy);
-  return { addClass, connectedEdges, cy, cytoscape };
+  return {
+    addClass,
+    connectedEdges,
+    cy,
+    cytoscape,
+    layout,
+    setAutoCompleteLayout(value: boolean) {
+      autoCompleteLayout = value;
+    },
+    resetLayout() {
+      autoCompleteLayout = true;
+      layoutStopHandler = null;
+    },
+  };
 });
 
 vi.mock('cytoscape', () => {
@@ -88,8 +128,11 @@ vi.mock('cytoscape', () => {
 
 vi.mock('cytoscape-fcose', () => ({ default: vi.fn() }));
 
-function createLargeFixture(): Ontology {
-  const entityTypes = Array.from({ length: 350 }, (_, index) => ({
+function createLargeFixture(
+  nodeCount = 350,
+  relationshipCount = nodeCount - 1,
+): Ontology {
+  const entityTypes = Array.from({ length: nodeCount }, (_, index) => ({
     id: `node-${index}`,
     name: `Node ${index}`,
     description: `Taxonomy node ${index}`,
@@ -105,6 +148,19 @@ function createLargeFixture(): Ontology {
     cardinality: 'many-to-one',
     kind: 'subclass',
   }));
+  for (
+    let index = 0;
+    relationships.length < relationshipCount;
+    index += 1
+  ) {
+    relationships.push({
+      id: `related-${index}`,
+      name: 'relatedTo',
+      from: entityTypes[index % entityTypes.length].id,
+      to: entityTypes[(index + 17) % entityTypes.length].id,
+      cardinality: 'many-to-many',
+    });
+  }
 
   return {
     name: 'Large Taxonomy Fixture',
@@ -184,9 +240,15 @@ interface CapturedConfig {
 describe('OntologyGraph adaptive rendering', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    graphMocks.resetLayout();
     useAppStore.getState().resetToDefault();
     localStorage.removeItem('ontology-legend-collapsed');
     delete window.__ONTOLOGY_PREVIEW_CY__;
+    delete window.__ONTOLOGY_GRAPH_METRICS__;
+    delete window.__ONTOLOGY_GRAPH_PERFORMANCE_ENABLED__;
+    delete window.__ONTOLOGY_GRAPH_PAGE_MAX_LONG_TASK_MS__;
+    delete window.__ONTOLOGY_GRAPH_LAYOUT_ANIMATION_MS__;
+    window.__ONTOLOGY_GRAPH_LAYOUT_DELAY_MS__ = 0;
   });
 
   it('preserves the proof-quality layout for a small ontology', async () => {
@@ -223,7 +285,13 @@ describe('OntologyGraph adaptive rendering', () => {
     });
 
     const config = graphMocks.cytoscape.mock.calls[0][0] as CapturedConfig;
-    expect(config.layout.name).toBe('breadthfirst');
+    expect(config.layout.name).toBe('preset');
+    expect(graphMocks.cy.layout).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'breadthfirst',
+        animate: true,
+      }),
+    );
     expect(config.elements.length).toBeLessThanOrEqual(
       MAX_RENDERED_NODES + MAX_RENDERED_EDGES,
     );
@@ -269,6 +337,168 @@ describe('OntologyGraph adaptive rendering', () => {
     });
     expect(screen.getByRole('slider', { name: 'Detail: 2 hops' })).toHaveValue('2');
     expect(resetView).toBeEnabled();
+  });
+
+  it('lays out a newly loaded massive ontology exactly once', async () => {
+    render(<OntologyGraph />);
+    await waitFor(() => {
+      expect(graphMocks.cytoscape).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      useAppStore.getState().loadOntology(createLargeFixture());
+    });
+    await waitFor(() => {
+      expect(graphMocks.cytoscape).toHaveBeenCalledTimes(2);
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+
+    expect(graphMocks.cytoscape).toHaveBeenCalledTimes(2);
+  });
+
+  it('records the Brick-scale rendering budgets', async () => {
+    window.__ONTOLOGY_GRAPH_PERFORMANCE_ENABLED__ = true;
+    useAppStore.getState().loadOntology(
+      createLargeFixture(1_518, 1_736),
+    );
+
+    render(<OntologyGraph />);
+    await waitFor(() => {
+      expect(window.__ONTOLOGY_GRAPH_METRICS__?.status).toBe('idle');
+    });
+
+    expect(window.__ONTOLOGY_GRAPH_METRICS__).toMatchObject({
+      totalNodeCount: 1_518,
+      totalEdgeCount: 1_736,
+      layoutCount: 1,
+      status: 'idle',
+    });
+    expect(
+      window.__ONTOLOGY_GRAPH_METRICS__?.renderedNodeCount,
+    ).toBeLessThanOrEqual(MAX_RENDERED_NODES);
+    expect(
+      window.__ONTOLOGY_GRAPH_METRICS__?.renderedEdgeCount,
+    ).toBeLessThanOrEqual(MAX_RENDERED_EDGES);
+    expect(
+      window.__ONTOLOGY_GRAPH_METRICS__?.lastLayoutDurationMs,
+    ).toBeLessThan(LARGE_GRAPH_LONG_TASK_BUDGET_MS);
+    expect(
+      window.__ONTOLOGY_GRAPH_METRICS__?.maxLongTaskDurationMs,
+    ).toBeLessThan(LARGE_GRAPH_LONG_TASK_BUDGET_MS);
+    const heapBytes = window.__ONTOLOGY_GRAPH_METRICS__?.retainedHeapBytes;
+    if (heapBytes != null) {
+      expect(heapBytes).toBeLessThan(
+        LARGE_GRAPH_RETAINED_HEAP_BUDGET_BYTES,
+      );
+    }
+  });
+
+  it('cancels and resumes a scheduled massive graph layout', () => {
+    vi.useFakeTimers();
+    window.__ONTOLOGY_GRAPH_LAYOUT_DELAY_MS__ = 1_000;
+    try {
+      useAppStore.getState().loadOntology(createLargeFixture());
+      render(<OntologyGraph />);
+
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Cancel rendering' }),
+      );
+      act(() => {
+        vi.runAllTimers();
+      });
+      expect(screen.getByText('Rendering paused')).toBeInTheDocument();
+      expect(graphMocks.cytoscape).not.toHaveBeenCalled();
+
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Resume rendering' }),
+      );
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+      expect(graphMocks.cytoscape).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops and resumes an active massive graph layout', () => {
+    vi.useFakeTimers();
+    graphMocks.setAutoCompleteLayout(false);
+    try {
+      useAppStore.getState().loadOntology(createLargeFixture());
+      render(<OntologyGraph />);
+
+      act(() => {
+        vi.advanceTimersByTime(0);
+      });
+      expect(screen.getByText('Laying out bounded graph')).toBeInTheDocument();
+      expect(graphMocks.layout.run).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Cancel rendering' }),
+      );
+      expect(graphMocks.layout.stop).toHaveBeenCalledTimes(1);
+      expect(screen.getByText('Rendering paused')).toBeInTheDocument();
+
+      graphMocks.setAutoCompleteLayout(true);
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Resume rendering' }),
+      );
+      act(() => {
+        vi.advanceTimersByTime(0);
+      });
+      expect(graphMocks.cytoscape).toHaveBeenCalledTimes(2);
+      expect(screen.queryByText('Rendering paused')).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('retries a failed standard graph layout', async () => {
+    graphMocks.cytoscape.mockImplementationOnce(() => {
+      throw new Error('Layout failed once');
+    });
+
+    render(<OntologyGraph />);
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Layout failed once',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => {
+      expect(graphMocks.cytoscape).toHaveBeenCalledTimes(2);
+    });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('applies a view change before a scheduled layout starts', () => {
+    vi.useFakeTimers();
+    window.__ONTOLOGY_GRAPH_LAYOUT_DELAY_MS__ = 1_000;
+    try {
+      useAppStore.getState().loadOntology(createLargeFixture());
+      render(<OntologyGraph />);
+
+      fireEvent.change(
+        screen.getByRole('searchbox', { name: 'Jump to an entity' }),
+        { target: { value: 'Node 349' } },
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Find' }));
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+
+      expect(graphMocks.cytoscape).toHaveBeenCalledTimes(1);
+      const config = graphMocks.cytoscape.mock.calls[0][0] as CapturedConfig;
+      expect(config.elements).toContainEqual(
+        expect.objectContaining({
+          data: expect.objectContaining({ id: 'node-349' }),
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('keeps relationship labels occluded for selected dense graph hubs', async () => {

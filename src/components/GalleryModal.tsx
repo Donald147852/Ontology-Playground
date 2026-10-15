@@ -379,6 +379,7 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
               return (
                 <motion.div
                   key={entry.id}
+                  data-catalogue-id={entry.id}
                   layout
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}

@@ -866,7 +866,8 @@ body {
 .large-graph-collapse,
 .large-graph-search button,
 .large-graph-options button,
-.large-graph-selection-action button {
+.large-graph-selection-action button,
+.graph-layout-status button {
   padding: 6px 10px;
   background: var(--bg-secondary);
   color: var(--text-primary);
@@ -880,7 +881,8 @@ body {
 .large-graph-collapse:hover,
 .large-graph-search button:hover,
 .large-graph-options button:hover,
-.large-graph-selection-action button:hover {
+.large-graph-selection-action button:hover,
+.graph-layout-status button:hover {
   background: var(--ms-blue);
   color: var(--on-accent);
   border-color: var(--ms-blue);
@@ -897,6 +899,30 @@ body {
   background: var(--bg-secondary);
   color: var(--text-primary);
   border-color: var(--border-color);
+}
+
+.graph-layout-status {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 4;
+  display: flex;
+  width: min(360px, calc(100% - 32px));
+  padding: 16px;
+  transform: translate(-50%, -50%);
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-lg);
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.graph-layout-status strong {
+  color: var(--text-primary);
 }
 
 .large-graph-counts,
