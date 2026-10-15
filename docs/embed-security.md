@@ -49,6 +49,7 @@ The `serializeToRDF()` function passes all ontology values through `escapeXml()`
 | Layer | Protection |
 |---|---|
 | **Catalogue build** | Directory names validated against `SAFE_SLUG_RE` (alphanumeric + hyphens only), symlinks rejected |
+| **Catalogue payloads** | Versioned payloads are restricted to the index origin and verified against their SHA-256 index hash before parsing |
 | **RDF validation** | `validate-rdf.ts` script validates ontology structure during CI |
 | **PR review** | Community submissions require human review before merge |
 | **No unsafe DOM sinks** | No `dangerouslySetInnerHTML`, `innerHTML`, `document.write`, or `eval` in embed code |
@@ -70,4 +71,5 @@ The `data-ontology-url` attribute allows loading an ontology from an arbitrary U
 | XSS via RDF output | Yes | `escapeXml()` + JSX escaping |
 | CSS injection via colors | Yes | Canvas renderer, not DOM CSS |
 | Path traversal via catalogue IDs | Yes | `SAFE_SLUG_RE` validation |
+| Cross-origin/tampered catalogue payload | Yes | Same-origin URL enforcement + SHA-256 verification |
 | Code injection via `data-ontology-url` | N/A | URL set by page author, data rendered safely |

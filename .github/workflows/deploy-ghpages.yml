@@ -29,6 +29,21 @@ jobs:
 
       - run: npm ci --ignore-scripts
 
+      - name: Restore published catalogue payloads
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            public/catalogue-payloads
+            public/catalogue-payloads-manifest.json
+          key: catalogue-payloads-${{ github.run_id }}
+          restore-keys: |
+            catalogue-payloads-
+
+      - name: Restore payload history from current deployment
+        run: >-
+          npm run catalogue:restore --
+          "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/"
+
       - run: npm run catalogue:build
 
       - run: npm test
@@ -43,6 +58,14 @@ jobs:
           VITE_API_BASE: ${{ secrets.VITE_API_BASE }}
           VITE_DEPLOYED_COMMIT_SHA: ${{ github.sha }}
           VITE_REPOSITORY: ${{ github.repository }}
+
+      - name: Preserve published catalogue payloads
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            public/catalogue-payloads
+            public/catalogue-payloads-manifest.json
+          key: catalogue-payloads-${{ github.run_id }}
 
       - name: Copy SPA fallback
         run: cp build/index.html build/404.html

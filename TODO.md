@@ -146,8 +146,8 @@ into a static JSON file.
   1. Reads all `catalogue/**/*.rdf` files
   2. Parses each via the RDF parser from §1
   3. Reads associated `metadata.json`
-  4. Emits `public/catalogue.json` — a single JSON file with all ontologies,
-     metadata, and category info
+  4. Emits `public/catalogue.json` as a lightweight metadata index plus
+     content-addressed graphs under `public/catalogue-payloads/`
 - [x] Add an npm script: `"catalogue:build": "tsx scripts/compile-catalogue.ts"`
 - [x] Integrate into `npm run build`:
   `"build": "npm run catalogue:build && tsc -b && vite build"`
@@ -187,8 +187,8 @@ into a static JSON file.
   without manual navigation.
 
 ### 3.4 Catalogue UI (upgrade GalleryModal)
-- [x] Refactor `GalleryModal` to load from `catalogue.json` instead of
-  hardcoded `sampleOntologies.ts`
+- [x] Refactor `GalleryModal` to load the `catalogue.json` index instead of
+  hardcoded `sampleOntologies.ts`, then lazy-load selected graph payloads
 - [x] Add category filters: Official / Community, plus domain tags (retail,
   healthcare, etc.)
 - [x] Add search/filter by name, author, tags
@@ -215,7 +215,7 @@ tutorials, docs) — similar to how CodePen or GitHub Gist embeds work.
   - Accepts ontology data via:
     - `data-ontology-url` attribute (URL to a `.rdf` or `.json` file)
     - `data-ontology-inline` attribute (inline JSON, base64-encoded)
-    - `data-catalogue-id` attribute (loads from the published `catalogue.json`)
+    - `data-catalogue-id` attribute (loads the published index + selected payload)
 - [x] Build as a single JS + CSS bundle: `ontology-embed.js` + `ontology-embed.css`
 - [x] Add Vite build config for the embed target:
   ```ts

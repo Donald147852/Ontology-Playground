@@ -1,10 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { createHash } from 'node:crypto';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { GalleryModal } from './GalleryModal';
 import { useAppStore } from '../store/appStore';
 import { useDesignerStore } from '../store/designerStore';
-import type { Catalogue } from '../types/catalogue';
+import { clearCatalogueCache } from '../lib/catalogue';
+import type {
+  Catalogue,
+  CatalogueEntry,
+  CatalogueEntryPayload,
+} from '../types/catalogue';
 import type { Ontology } from '../data/ontology';
 
 // Mock framer-motion to avoid animation issues in tests
@@ -44,11 +50,52 @@ const makeOntology = (name: string, entityCount = 2, relCount = 1): Ontology => 
   })),
 });
 
+const fakePayloads: Record<string, CatalogueEntryPayload> = {
+  'official/cosmic-coffee': {
+    schemaVersion: 1,
+    id: 'official/cosmic-coffee',
+    ontology: makeOntology('Fourth Coffee', 3, 2),
+    bindings: [],
+  },
+  'community/drsmith/hospital-net': {
+    schemaVersion: 1,
+    id: 'community/drsmith/hospital-net',
+    ontology: makeOntology('Hospital Network', 4, 3),
+    bindings: [],
+  },
+  'official/finance-ledger': {
+    schemaVersion: 1,
+    id: 'official/finance-ledger',
+    ontology: makeOntology('Finance Ledger', 2, 1),
+    bindings: [],
+  },
+};
+
+function createEntry(
+  metadata: Omit<
+    CatalogueEntry,
+    'entityCount' | 'relationshipCount' | 'payloadUrl' | 'payloadHash'
+  >,
+): CatalogueEntry {
+  const payload = fakePayloads[metadata.id];
+  const content = JSON.stringify(payload, null, 2) + '\n';
+  const hash = createHash('sha256').update(content).digest('hex');
+
+  return {
+    ...metadata,
+    entityCount: payload.ontology.entityTypes.length,
+    relationshipCount: payload.ontology.relationships.length,
+    payloadUrl: `catalogue-payloads/${metadata.id}/${hash}.json`,
+    payloadHash: `sha256:${hash}`,
+  };
+}
+
 const fakeCatalogue: Catalogue = {
+  schemaVersion: 2,
   generatedAt: '2025-01-01T00:00:00Z',
   count: 3,
   entries: [
-    {
+    createEntry({
       id: 'official/cosmic-coffee',
       name: 'Fourth Coffee',
       description: 'Coffee supply chain ontology',
@@ -57,10 +104,8 @@ const fakeCatalogue: Catalogue = {
       tags: ['coffee', 'supply-chain'],
       author: 'Ontology Playground',
       source: 'official',
-      ontology: makeOntology('Fourth Coffee', 3, 2),
-      bindings: [],
-    },
-    {
+    }),
+    createEntry({
       id: 'community/drsmith/hospital-net',
       name: 'Hospital Network',
       description: 'Healthcare facility ontology',
@@ -72,10 +117,8 @@ const fakeCatalogue: Catalogue = {
       license: 'MIT',
       sourceUrl: 'https://example.com/hospital-network',
       version: '1.2.0',
-      ontology: makeOntology('Hospital Network', 4, 3),
-      bindings: [],
-    },
-    {
+    }),
+    createEntry({
       id: 'official/finance-ledger',
       name: 'Finance Ledger',
       description: 'Financial transactions ontology',
@@ -83,30 +126,66 @@ const fakeCatalogue: Catalogue = {
       tags: ['finance', 'ledger'],
       author: 'FinCorp',
       source: 'official',
-      ontology: makeOntology('Finance Ledger', 2, 1),
-      bindings: [],
-    },
+    }),
   ],
 };
 
-function mockFetchSuccess(data: Catalogue = fakeCatalogue) {
-  vi.spyOn(globalThis, 'fetch').mockResolvedValue({
-    ok: true,
-    json: () => Promise.resolve(data),
-  } as Response);
+function mockFetchSuccess(
+  data: Catalogue = fakeCatalogue,
+  payloadFailures: Record<string, number> = {},
+) {
+  return vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+    const url = input.toString();
+    if (url.endsWith('/catalogue.json')) {
+      return new Response(JSON.stringify(data), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    const entry = data.entries.find((candidate) =>
+      url.endsWith(candidate.payloadUrl));
+    if (!entry) {
+      return new Response('not found', { status: 404 });
+    }
+
+    const failureStatus = payloadFailures[entry.id];
+    if (failureStatus) {
+      return new Response('payload unavailable', { status: failureStatus });
+    }
+
+    return new Response(
+      JSON.stringify(fakePayloads[entry.id], null, 2) + '\n',
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
+  });
 }
 
 function mockFetchFailure(status = 404) {
-  vi.spyOn(globalThis, 'fetch').mockResolvedValue({
-    ok: false,
-    status,
-  } as Response);
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+    new Response('failed', { status }),
+  );
+}
+
+function deferredResponse(): {
+  promise: Promise<Response>;
+  resolve: (response: Response) => void;
+} {
+  let resolve!: (response: Response) => void;
+  const promise = new Promise<Response>((resolver) => {
+    resolve = resolver;
+  });
+  return { promise, resolve };
 }
 
 describe('GalleryModal', () => {
   const onClose = vi.fn();
 
   beforeEach(() => {
+    clearCatalogueCache();
     onClose.mockClear();
     useAppStore.getState().resetToDefault();
     window.location.hash = '#/catalogue';
@@ -117,7 +196,7 @@ describe('GalleryModal', () => {
   });
 
   it('shows loading state then renders catalogue entries', async () => {
-    mockFetchSuccess();
+    const fetchMock = mockFetchSuccess();
     render(<GalleryModal onClose={onClose} />);
 
     // Loading state appears first
@@ -130,6 +209,8 @@ describe('GalleryModal', () => {
     expect(screen.getByText('Hospital Network')).toBeTruthy();
     expect(screen.getByText('Finance Ledger')).toBeTruthy();
     expect(screen.queryByText('Loading catalogue…')).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0].toString()).toMatch(/catalogue\.json$/);
   });
 
   it('shows error state on fetch failure', async () => {
@@ -242,8 +323,8 @@ describe('GalleryModal', () => {
     expect(screen.getByText('No ontologies match your filters.')).toBeTruthy();
   });
 
-  it('loads an ontology and navigates to its deep link', async () => {
-    mockFetchSuccess();
+  it('preloads one payload and lets the deep-link effect load the ontology once', async () => {
+    const fetchMock = mockFetchSuccess();
     const user = userEvent.setup();
     render(<GalleryModal onClose={onClose} />);
 
@@ -251,15 +332,151 @@ describe('GalleryModal', () => {
       expect(screen.getByText('Fourth Coffee')).toBeTruthy();
     });
 
-    // Click the first non-active ontology's "Load" button.
+    const initialOntology = useAppStore.getState().currentOntology;
     const loadButtons = screen.getAllByText('Load');
     await user.click(loadButtons[0]);
 
-    const state = useAppStore.getState();
-    expect(state.currentOntology.name).toBe('Hospital Network');
-    expect(state.currentOntology.entityTypes).toHaveLength(4);
-    // Now navigates to deep link instead of calling onClose
-    expect(window.location.hash).toBe('#/catalogue/community/drsmith/hospital-net');
+    await waitFor(() => {
+      expect(window.location.hash).toBe(
+        '#/catalogue/community/drsmith/hospital-net',
+      );
+    });
+    expect(useAppStore.getState().currentOntology).toBe(initialOntology);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not let a slower selection override a newer selection', async () => {
+    const hospitalResponse = deferredResponse();
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = input.toString();
+      if (url.endsWith('/catalogue.json')) {
+        return new Response(JSON.stringify(fakeCatalogue), { status: 200 });
+      }
+      const entry = fakeCatalogue.entries.find((candidate) =>
+        url.endsWith(candidate.payloadUrl));
+      if (!entry) return new Response('not found', { status: 404 });
+      if (entry.id === 'community/drsmith/hospital-net') {
+        return hospitalResponse.promise;
+      }
+      return new Response(
+        JSON.stringify(fakePayloads[entry.id], null, 2) + '\n',
+        { status: 200 },
+      );
+    });
+    const user = userEvent.setup();
+    render(<GalleryModal onClose={onClose} />);
+    await screen.findByText('Hospital Network');
+
+    await user.click(screen.getAllByText('Load')[0]);
+    await user.click(screen.getByText('Load'));
+    await waitFor(() => {
+      expect(window.location.hash).toBe(
+        '#/catalogue/official/finance-ledger',
+      );
+    });
+
+    await act(async () => {
+      hospitalResponse.resolve(new Response(
+        JSON.stringify(
+          fakePayloads['community/drsmith/hospital-net'],
+          null,
+          2,
+        ) + '\n',
+        { status: 200 },
+      ));
+      await hospitalResponse.promise;
+    });
+    expect(window.location.hash).toBe(
+      '#/catalogue/official/finance-ledger',
+    );
+  });
+
+  it('does not navigate after the gallery is dismissed during a load', async () => {
+    const hospitalResponse = deferredResponse();
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = input.toString();
+      if (url.endsWith('/catalogue.json')) {
+        return new Response(JSON.stringify(fakeCatalogue), { status: 200 });
+      }
+      return hospitalResponse.promise;
+    });
+    const user = userEvent.setup();
+    render(<GalleryModal onClose={onClose} />);
+    await screen.findByText('Hospital Network');
+
+    await user.click(screen.getAllByText('Load')[0]);
+    await user.click(screen.getByText('Done'));
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      hospitalResponse.resolve(new Response(
+        JSON.stringify(
+          fakePayloads['community/drsmith/hospital-net'],
+          null,
+          2,
+        ) + '\n',
+        { status: 200 },
+      ));
+      await hospitalResponse.promise;
+    });
+    expect(window.location.hash).toBe('#/catalogue');
+  });
+
+  it('does not enter Designer after browser history leaves the gallery', async () => {
+    const payloadResponse = deferredResponse();
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      if (input.toString().endsWith('/catalogue.json')) {
+        return new Response(JSON.stringify(fakeCatalogue), { status: 200 });
+      }
+      return payloadResponse.promise;
+    });
+    const initialOntology = useAppStore.getState().currentOntology;
+    const initialDraft = useDesignerStore.getState().ontology;
+    const user = userEvent.setup();
+    render(<GalleryModal onClose={onClose} />);
+    await screen.findByText('Fourth Coffee');
+
+    await user.click(screen.getAllByTitle('Edit in Designer')[0]);
+    act(() => {
+      window.history.pushState(null, '', '#/');
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    });
+
+    await act(async () => {
+      payloadResponse.resolve(new Response(
+        JSON.stringify(
+          fakePayloads['official/cosmic-coffee'],
+          null,
+          2,
+        ) + '\n',
+        { status: 200 },
+      ));
+      await payloadResponse.promise;
+    });
+
+    expect(window.location.hash).toBe('#/');
+    expect(useAppStore.getState().currentOntology).toBe(initialOntology);
+    expect(useDesignerStore.getState().ontology).toBe(initialDraft);
+  });
+
+  it('surfaces payload failures without loading an empty ontology', async () => {
+    mockFetchSuccess(fakeCatalogue, {
+      'community/drsmith/hospital-net': 503,
+    });
+    const user = userEvent.setup();
+    render(<GalleryModal onClose={onClose} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Hospital Network')).toBeTruthy();
+    });
+    await user.click(screen.getAllByText('Load')[0]);
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert').textContent).toContain(
+        'Failed to load ontology "community/drsmith/hospital-net" (503)',
+      );
+    });
+    expect(useAppStore.getState().currentOntology.name).not.toBe('Hospital Network');
   });
 
   it('shows "Community" badge only on community entries', async () => {
@@ -330,11 +547,11 @@ describe('GalleryModal', () => {
     expect(editButtons.length).toBeGreaterThan(0);
     await user.click(editButtons[0]);
 
-    // The designer store should have the ontology loaded
-    const designerState = useDesignerStore.getState();
-    expect(designerState.ontology.name).toBe('Fourth Coffee');
-    expect(designerState.ontology.entityTypes).toHaveLength(3);
-    expect(designerState.ontology.relationships).toHaveLength(2);
+    await waitFor(() => {
+      expect(useDesignerStore.getState().ontology.name).toBe('Fourth Coffee');
+    });
+    expect(useDesignerStore.getState().ontology.entityTypes).toHaveLength(3);
+    expect(useDesignerStore.getState().ontology.relationships).toHaveLength(2);
 
     // The app store (playground) should also have the ontology loaded
     const appState = useAppStore.getState();

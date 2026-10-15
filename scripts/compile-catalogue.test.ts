@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
@@ -24,6 +25,11 @@ import {
 
 const ROOT = join(import.meta.dirname, '..');
 const CATALOGUE_JSON = join(ROOT, 'public', 'catalogue.json');
+const PAYLOAD_MANIFEST_JSON = join(
+  ROOT,
+  'public',
+  'catalogue-payloads-manifest.json',
+);
 const COMMUNITY_DIR = join(ROOT, 'catalogue', 'community');
 
 interface CatalogueTestEntry {
@@ -34,9 +40,18 @@ interface CatalogueTestEntry {
   tags: string[];
   author: string;
   source: 'official' | 'community' | 'external';
+  entityCount: number;
+  relationshipCount: number;
+  payloadUrl: string;
+  payloadHash: string;
   license?: string;
   sourceUrl?: string;
   version?: string;
+}
+
+interface CatalogueTestPayload {
+  schemaVersion: 1;
+  id: string;
   ontology: {
     entityTypes: { name: string; properties: { isIdentifier?: boolean }[] }[];
     relationships: unknown[];
@@ -45,6 +60,7 @@ interface CatalogueTestEntry {
 }
 
 interface CatalogueTestOutput {
+  schemaVersion: 2;
   count: number;
   generatedAt: string;
   entries: CatalogueTestEntry[];
@@ -169,6 +185,12 @@ afterEach(() => {
   }
 });
 
+function readPayload(entry: CatalogueTestEntry): CatalogueTestPayload {
+  return JSON.parse(
+    readFileSync(join(ROOT, 'public', entry.payloadUrl), 'utf-8'),
+  ) as CatalogueTestPayload;
+}
+
 describe('catalogue compilation (end-to-end)', () => {
   it('npm run catalogue:build succeeds with the real catalogue', () => {
     const result = execSync('npx tsx scripts/compile-catalogue.ts', {
@@ -178,8 +200,10 @@ describe('catalogue compilation (end-to-end)', () => {
     });
     expect(result).toContain('official/cosmic-coffee');
     expect(result).toContain('official/ecommerce');
+    expect(result).toContain('index entries and');
 
     const output = readCatalogue();
+    expect(output.schemaVersion).toBe(2);
     expect(output.count).toBe(output.entries.length);
     expect(output.entries.length).toBeGreaterThan(0);
     expect(output.generatedAt).toBeTruthy();
@@ -193,28 +217,133 @@ describe('catalogue compilation (end-to-end)', () => {
       expect(entry.description).toBeTruthy();
       expect(entry.category).toBeTruthy();
       expect(['official', 'community', 'external']).toContain(entry.source);
-      expect(entry.ontology).toBeTruthy();
-      expect(entry.ontology.entityTypes.length).toBeGreaterThan(0);
-      expect(Array.isArray(entry.bindings)).toBe(true);
+      expect(entry.entityCount).toBeGreaterThan(0);
+      expect(entry.relationshipCount).toBeGreaterThanOrEqual(0);
+      expect(entry.payloadUrl).toMatch(/^catalogue-payloads\//);
+      expect(entry.payloadHash).toMatch(/^sha256:[a-f0-9]{64}$/);
+      expect(entry).not.toHaveProperty('ontology');
+      expect(entry).not.toHaveProperty('bindings');
       expect(Array.isArray(entry.tags)).toBe(true);
+
+      const payloadPath = join(ROOT, 'public', entry.payloadUrl);
+      const payloadContent = readFileSync(payloadPath, 'utf-8');
+      const actualHash = createHash('sha256')
+        .update(payloadContent)
+        .digest('hex');
+      expect(entry.payloadHash).toBe(`sha256:${actualHash}`);
+    }
+  });
+
+  it('payload manifest covers every current content-addressed payload', () => {
+    const catalogue = readCatalogue();
+    const manifest = JSON.parse(
+      readFileSync(PAYLOAD_MANIFEST_JSON, 'utf-8'),
+    ) as {
+      schemaVersion: number;
+      payloads: { payloadUrl: string; payloadHash: string }[];
+    };
+    const manifestEntries = new Map(
+      manifest.payloads.map((entry) => [entry.payloadUrl, entry.payloadHash]),
+    );
+
+    expect(manifest.schemaVersion).toBe(1);
+    for (const entry of catalogue.entries) {
+      expect(manifestEntries.get(entry.payloadUrl)).toBe(entry.payloadHash);
     }
   });
 
   it('cosmic-coffee entry preserves data bindings', () => {
-    const coffee = readCatalogue().entries.find((e: { id: string }) => e.id === 'official/cosmic-coffee');
-    expect(coffee).toBeTruthy();
-    expect(coffee.bindings.length).toBeGreaterThan(0);
-    expect(coffee.bindings[0].table).toBeTruthy();
-    expect(coffee.bindings[0].columnMappings).toBeTruthy();
+    const coffee = findEntry('official/cosmic-coffee');
+    const payload = readPayload(coffee);
+    expect(payload.bindings.length).toBeGreaterThan(0);
+    expect(payload.bindings[0].table).toBeTruthy();
+    expect(payload.bindings[0].columnMappings).toBeTruthy();
   });
 
   it('all ontologies round-trip through RDF serialization', () => {
     for (const entry of readCatalogue().entries) {
-      const rdf = serializeToRDF(entry.ontology, entry.bindings);
+      const payload = readPayload(entry);
+      const rdf = serializeToRDF(payload.ontology, payload.bindings);
       const reparsed = parseRDF(rdf);
-      expect(reparsed.ontology.entityTypes.length).toBe(entry.ontology.entityTypes.length);
-      expect(reparsed.ontology.relationships.length).toBe(entry.ontology.relationships.length);
+      expect(reparsed.ontology.entityTypes.length).toBe(payload.ontology.entityTypes.length);
+      expect(reparsed.ontology.relationships.length).toBe(payload.ontology.relationships.length);
     }
+  });
+
+  it('retains previously published content-addressed payloads', () => {
+    const catalogueRoot = createTemporaryCatalogue();
+    const outputRoot = mkdtempSync(
+      join(tmpdir(), 'ontology-catalogue-output-test-'),
+    );
+    temporaryDirectories.push(outputRoot);
+    const outputPath = join(outputRoot, 'catalogue.json');
+    const legacyContent = 'previous payload\n';
+    const legacyHash = createHash('sha256')
+      .update(legacyContent)
+      .digest('hex');
+    const legacyPayloadPath = join(
+      outputRoot,
+      'catalogue-payloads',
+      'official',
+      'legacy',
+      `${legacyHash}.json`,
+    );
+    mkdirSync(dirname(legacyPayloadPath), { recursive: true });
+    writeFileSync(legacyPayloadPath, legacyContent);
+    writeFileSync(outputPath, 'previous index\n');
+
+    runCatalogueCompiler(catalogueRoot, outputPath);
+
+    expect(readFileSync(legacyPayloadPath, 'utf-8')).toBe(
+      legacyContent,
+    );
+    expect(JSON.parse(readFileSync(
+      join(outputRoot, 'catalogue-payloads-manifest.json'),
+      'utf-8',
+    ))).toMatchObject({
+      schemaVersion: 1,
+      payloads: [{
+        payloadUrl:
+          `catalogue-payloads/official/legacy/${legacyHash}.json`,
+        payloadHash: `sha256:${legacyHash}`,
+      }],
+    });
+    expect(JSON.parse(readFileSync(outputPath, 'utf-8'))).toMatchObject({
+      schemaVersion: 2,
+      count: 0,
+      entries: [],
+    });
+    expect(existsSync(`${outputPath}.tmp-${process.pid}`)).toBe(false);
+  });
+
+  it('restores payload history before the production deployment build', () => {
+    const workflow = readFileSync(
+      join(ROOT, '.github', 'workflows', 'deploy-ghpages.yml'),
+      'utf-8',
+    );
+    const restoreStep = workflow.indexOf(
+      'name: Restore published catalogue payloads',
+    );
+    const compileStep = workflow.indexOf('run: npm run catalogue:build');
+    const buildStep = workflow.indexOf('name: Build');
+    const saveStep = workflow.indexOf(
+      'name: Preserve published catalogue payloads',
+    );
+    const uploadStep = workflow.indexOf('actions/upload-pages-artifact@');
+
+    expect(restoreStep).toBeGreaterThan(-1);
+    expect(restoreStep).toBeLessThan(compileStep);
+    expect(workflow.indexOf(
+      'name: Restore payload history from current deployment',
+    )).toBeLessThan(compileStep);
+    expect(saveStep).toBeGreaterThan(buildStep);
+    expect(saveStep).toBeLessThan(uploadStep);
+    expect(
+      workflow.match(/^\s+public\/catalogue-payloads$/gm),
+    ).toHaveLength(2);
+    expect(
+      workflow.match(/key: catalogue-payloads-\$\{\{ github\.run_id \}\}/g),
+    ).toHaveLength(2);
   });
 });
 
@@ -564,8 +693,9 @@ describe('catalogue metadata validation', () => {
 
   it('includes the supply chain disruption community ontology', () => {
     const entry = findEntry('community/ravi-chandu/supply-chain-disruption-risk-propagation');
-    const entityNames = entry.ontology.entityTypes.map((entity) => entity.name);
-    const identifierCount = entry.ontology.entityTypes.filter((entity) =>
+    const payload = readPayload(entry);
+    const entityNames = payload.ontology.entityTypes.map((entity) => entity.name);
+    const identifierCount = payload.ontology.entityTypes.filter((entity) =>
       entity.properties.some((property) => property.isIdentifier),
     ).length;
 
@@ -582,8 +712,8 @@ describe('catalogue metadata validation', () => {
       'MitigationAction',
       'AlternativeSupplier',
     ]));
-    expect(entry.ontology.entityTypes.length).toBeGreaterThanOrEqual(7);
-    expect(entry.ontology.relationships.length).toBeGreaterThanOrEqual(7);
-    expect(identifierCount).toBe(entry.ontology.entityTypes.length);
+    expect(payload.ontology.entityTypes.length).toBeGreaterThanOrEqual(7);
+    expect(payload.ontology.relationships.length).toBeGreaterThanOrEqual(7);
+    expect(identifierCount).toBe(payload.ontology.entityTypes.length);
   });
 });

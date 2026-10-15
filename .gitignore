@@ -25,6 +25,8 @@ dist-ssr
 build
 api/local.settings.json
 public/catalogue.json
+public/catalogue-payloads-manifest.json
+public/catalogue-payloads/
 ontology-preview/
 ontology-preview-artifact/
 ontology-preview-assets/

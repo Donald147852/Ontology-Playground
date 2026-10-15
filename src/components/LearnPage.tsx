@@ -6,7 +6,7 @@ import { navigate } from '../lib/router';
 import { isValidCatalogueId } from '../lib/catalogueId';
 import type { Route } from '../lib/router';
 import type { LearnManifest, LearnCourse, LearnArticle } from '../types/learn';
-import type { Catalogue } from '../types/catalogue';
+import { loadCatalogueEntry } from '../lib/catalogue';
 import type { Core as CytoscapeCore, StylesheetCSS, LayoutOptions } from 'cytoscape';
 
 interface LearnPageProps {
@@ -222,13 +222,6 @@ function replaceEmbedPlaceholder(
   element.replaceWith(wrapper);
 }
 
-function renderEmbedError(slot: HTMLElement, message: string) {
-  const error = document.createElement('div');
-  error.className = 'learn-embed-error';
-  error.textContent = message;
-  slot.replaceChildren(error);
-}
-
 function ArticleView({
   article,
   course,
@@ -271,39 +264,58 @@ function ArticleView({
     if (slots.length === 0) return;
 
     let cancelled = false;
-    fetch(`${import.meta.env.BASE_URL}catalogue.json`)
-      .then((res) => res.json() as Promise<Catalogue>)
-      .then((catalogue) => {
-        if (cancelled) return;
-        for (const slot of slots) {
-          const id = slot.dataset.catalogueId;
-          const diffId = slot.dataset.diffId;
-          const entry = catalogue.entries.find((e) => e.id === id);
-          if (!entry) {
-            renderEmbedError(slot, `Ontology "${id}" not found in catalogue`);
-            continue;
-          }
-          // Find the previous-step entry for diff
-          const prevEntry = diffId ? catalogue.entries.find((e) => e.id === diffId) : undefined;
+    for (const slot of slots) {
+      const id = slot.dataset.catalogueId;
+      const diffId = slot.dataset.diffId;
+      if (!id) continue;
 
-          // Compute diff: which entity/relationship IDs are new vs the previous step
+      Promise.all([
+        loadCatalogueEntry(id),
+        diffId ? loadCatalogueEntry(diffId) : Promise.resolve(undefined),
+      ])
+        .then(([entry, prevEntry]) => {
+          if (cancelled) return;
+
           let newEntityIds: Set<string> | undefined;
           let newRelIds: Set<string> | undefined;
           if (prevEntry) {
-            const prevEntIds = new Set(prevEntry.ontology.entityTypes.map((et) => et.id));
-            const prevRelIds = new Set(prevEntry.ontology.relationships.map((r) => r.id));
-            newEntityIds = new Set(entry.ontology.entityTypes.filter((et) => !prevEntIds.has(et.id)).map((et) => et.id));
-            newRelIds = new Set(entry.ontology.relationships.filter((r) => !prevRelIds.has(r.id)).map((r) => r.id));
+            const prevEntIds = new Set(
+              prevEntry.ontology.entityTypes.map((entity) => entity.id),
+            );
+            const prevRelIds = new Set(
+              prevEntry.ontology.relationships.map((relationship) => relationship.id),
+            );
+            newEntityIds = new Set(
+              entry.ontology.entityTypes
+                .filter((entity) => !prevEntIds.has(entity.id))
+                .map((entity) => entity.id),
+            );
+            newRelIds = new Set(
+              entry.ontology.relationships
+                .filter((relationship) => !prevRelIds.has(relationship.id))
+                .map((relationship) => relationship.id),
+            );
           }
-          renderEmbedSlot(slot, entry, darkMode, newEntityIds, newRelIds, prevEntry);
-        }
-      })
-      .catch(() => {
-        if (cancelled) return;
-        for (const slot of slots) {
-          renderEmbedError(slot, 'Failed to load catalogue');
-        }
-      });
+          renderEmbedSlot(
+            slot,
+            entry,
+            darkMode,
+            newEntityIds,
+            newRelIds,
+            prevEntry,
+          );
+        })
+        .catch((loadError) => {
+          if (!cancelled) {
+            renderEmbedError(
+              slot,
+              loadError instanceof Error
+                ? loadError.message
+                : 'Failed to load catalogue ontology',
+            );
+          }
+        });
+    }
     return () => { cancelled = true; };
   }, [article.slug, darkMode]);
 
@@ -650,27 +662,58 @@ function PresentationMode({
     const slots = slideRef.current.querySelectorAll<HTMLElement>('.learn-embed-slot');
     if (slots.length === 0) return;
     let cancelled = false;
-    fetch(`${import.meta.env.BASE_URL}catalogue.json`)
-      .then((res) => res.json() as Promise<Catalogue>)
-      .then((catalogue) => {
-        if (cancelled) return;
-        for (const slot of slots) {
-          const id = slot.dataset.catalogueId;
-          const diffId = slot.dataset.diffId;
-          const entry = catalogue.entries.find((e) => e.id === id);
-          if (!entry) continue;
-          const prevEntry = diffId ? catalogue.entries.find((e) => e.id === diffId) : undefined;
+    for (const slot of slots) {
+      const id = slot.dataset.catalogueId;
+      const diffId = slot.dataset.diffId;
+      if (!id) continue;
+
+      Promise.all([
+        loadCatalogueEntry(id),
+        diffId ? loadCatalogueEntry(diffId) : Promise.resolve(undefined),
+      ])
+        .then(([entry, prevEntry]) => {
+          if (cancelled) return;
+
           let newEntityIds: Set<string> | undefined;
           let newRelIds: Set<string> | undefined;
           if (prevEntry) {
-            const prevEntIds = new Set(prevEntry.ontology.entityTypes.map((et) => et.id));
-            const prevRelIdSet = new Set(prevEntry.ontology.relationships.map((r) => r.id));
-            newEntityIds = new Set(entry.ontology.entityTypes.filter((et) => !prevEntIds.has(et.id)).map((et) => et.id));
-            newRelIds = new Set(entry.ontology.relationships.filter((r) => !prevRelIdSet.has(r.id)).map((r) => r.id));
+            const prevEntIds = new Set(
+              prevEntry.ontology.entityTypes.map((entity) => entity.id),
+            );
+            const prevRelIds = new Set(
+              prevEntry.ontology.relationships.map((relationship) => relationship.id),
+            );
+            newEntityIds = new Set(
+              entry.ontology.entityTypes
+                .filter((entity) => !prevEntIds.has(entity.id))
+                .map((entity) => entity.id),
+            );
+            newRelIds = new Set(
+              entry.ontology.relationships
+                .filter((relationship) => !prevRelIds.has(relationship.id))
+                .map((relationship) => relationship.id),
+            );
           }
-          renderEmbedSlot(slot, entry, presenterDark, newEntityIds, newRelIds, prevEntry);
-        }
-      });
+          renderEmbedSlot(
+            slot,
+            entry,
+            presenterDark,
+            newEntityIds,
+            newRelIds,
+            prevEntry,
+          );
+        })
+        .catch((loadError) => {
+          if (!cancelled) {
+            renderEmbedError(
+              slot,
+              loadError instanceof Error
+                ? loadError.message
+                : 'Failed to load catalogue ontology',
+            );
+          }
+        });
+    }
     return () => { cancelled = true; };
   }, [slideIndex, presenterDark]);
 
@@ -755,6 +798,13 @@ interface EmbedOntology {
 }
 
 type EmbedEntry = { name: string; ontology: EmbedOntology };
+
+function renderEmbedError(slot: HTMLElement, message: string): void {
+  const error = document.createElement('div');
+  error.className = 'learn-embed-error';
+  error.textContent = message;
+  slot.replaceChildren(error);
+}
 
 /** Shared chessboard background CSS (mirrors .graph-container in app.css) — fully opaque */
 function applyChessboardBg(el: HTMLElement, darkMode: boolean) {
