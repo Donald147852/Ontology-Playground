@@ -354,7 +354,13 @@ describe('EmbedWidget', () => {
     await user.click(screen.getByText('Generated RDF subset'));
 
     expect(screen.getByRole('note').textContent).toContain(
-      'Source-only SHACL rules and unsupported triples',
+      'not the complete upstream ontology',
+    );
+    expect(screen.getByRole('note').textContent).toContain(
+      'Source-only RDF remains in the reviewed source',
+    );
+    expect(screen.getByRole('note').textContent).toContain(
+      'is not executed here',
     );
     expect(screen.getByText('Copy generated RDF')).toBeTruthy();
   });

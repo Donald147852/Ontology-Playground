@@ -8,6 +8,7 @@ import {
 } from '../lib/rdf/serializer';
 import { parseRDF, RDFParseError } from '../lib/rdf/parser';
 import type { Ontology, DataBinding } from '../data/ontology';
+import { SourceFidelityNote } from './SourceFidelityNote';
 
 const LEGACY_FORMATS_ENABLED = import.meta.env.VITE_ENABLE_LEGACY_FORMATS === 'true';
 
@@ -496,25 +497,11 @@ export function ImportExportModal({ onClose, onFabricPush }: ImportExportModalPr
             )}
 
             {exportFormat === 'rdf' && currentCatalogueEntry?.source === 'external' && (
-              <div
-                role="note"
-                style={{
-                  background: 'rgba(255, 185, 0, 0.10)',
-                  border: '1px solid rgba(255, 185, 0, 0.35)',
-                  borderRadius: 'var(--radius-sm)',
-                  color: 'var(--text-secondary)',
-                  fontSize: 11,
-                  lineHeight: 1.4,
-                  marginBottom: 12,
-                  padding: 8,
-                  textAlign: 'left',
-                }}
-              >
-                This download is generated from the editable visual subset of{' '}
-                {currentCatalogueEntry.name}. It does not reproduce source-only
-                SHACL rules or unsupported triples. Download the verified
-                original from the catalogue for the complete artifact.
-              </div>
+              <SourceFidelityNote className="import-export-source-fidelity-note">
+                <strong>About this download:</strong> This RDF represents the
+                editable visual subset of {currentCatalogueEntry.name}.
+                Source-only RDF remains intact in the reviewed source.
+              </SourceFidelityNote>
             )}
 
             {exportFormat === 'rdf' && (

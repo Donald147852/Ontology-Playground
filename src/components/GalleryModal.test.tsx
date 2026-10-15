@@ -584,9 +584,15 @@ describe('GalleryModal', () => {
     render(<GalleryModal onClose={onClose} />);
 
     await screen.findByText('Finance Ledger');
-    expect(screen.getByText(
-      /The graph and Designer use a supported visual subset/,
-    )).toBeTruthy();
+    const note = screen.getByRole('note');
+    expect(note.classList.contains('source-fidelity-note')).toBe(true);
+    expect(note.querySelector('.lucide-info')).toBeTruthy();
+    expect(note.textContent).toContain(
+      'The graph, Designer, and generated RDF use a visual subset',
+    );
+    expect(note.textContent).toContain(
+      'remain intact in the reviewed source',
+    );
 
     await user.click(screen.getByRole('button', {
       name: 'View generated RDF for Finance Ledger',
@@ -596,7 +602,10 @@ describe('GalleryModal', () => {
       'Playground-generated RDF subset',
     )).toBeTruthy();
     expect(screen.getByText(
-      /source-only SHACL rules and unsupported triples can be omitted/,
+      /not the complete upstream ontology/,
+    )).toBeTruthy();
+    expect(screen.getByText(
+      /Source-only RDF remains in the reviewed source/,
     )).toBeTruthy();
   });
 

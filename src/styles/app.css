@@ -1635,6 +1635,41 @@ body {
   color: var(--text-secondary);
 }
 
+.source-fidelity-note {
+  align-items: flex-start;
+  background: rgba(0, 120, 212, 0.08);
+  border: 1px solid rgba(0, 120, 212, 0.28);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  display: flex;
+  font-size: 12px;
+  gap: 8px;
+  line-height: 1.4;
+  padding: 8px 10px;
+}
+
+.source-fidelity-note > svg {
+  color: var(--info);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.source-fidelity-note strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.catalogue-source-fidelity-note {
+  font-size: 11px;
+  margin-bottom: 10px;
+}
+
+.import-export-source-fidelity-note {
+  font-size: 11px;
+  margin-bottom: 12px;
+  text-align: left;
+}
+
 .modal-header {
   text-align: center;
   margin-bottom: 32px;
@@ -2622,13 +2657,11 @@ body {
   background: rgba(216, 59, 1, 0.08);
   border-bottom: 1px solid var(--border-color);
 }
-.designer-source-fidelity-warning {
+.designer-source-fidelity-note {
   padding: 8px 12px;
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--text-secondary);
-  background: rgba(255, 185, 0, 0.10);
-  border-bottom: 1px solid rgba(255, 185, 0, 0.35);
+  border-left: 0;
+  border-right: 0;
+  border-radius: 0;
 }
 .designer-add-btn.small.secondary {
   background: var(--bg-tertiary, #e0e0e0);

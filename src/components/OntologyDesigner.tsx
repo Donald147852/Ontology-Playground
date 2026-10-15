@@ -11,6 +11,7 @@ import {
   isLargeOntologyGraph,
   ontologyGraphElementCount,
 } from '../lib/ontologyScale';
+import { SourceFidelityNote } from './SourceFidelityNote';
 
 interface OntologyDesignerProps {
   route: Route & { page: 'designer' };
@@ -124,11 +125,11 @@ export function OntologyDesigner({ route }: OntologyDesignerProps) {
       </div>
       {loadError && <div role="alert" className="designer-import-error">{loadError}</div>}
       {editingCatalogueEntry?.source === 'external' && (
-        <div role="note" className="designer-source-fidelity-warning">
-          Editing {editingCatalogueEntry.name} changes only the supported visual
-          subset. Designer exports do not reproduce source-only SHACL rules or
-          unsupported triples; the catalogue retains the verified original.
-        </div>
+        <SourceFidelityNote className="designer-source-fidelity-note">
+          <strong>About this draft:</strong> You are editing the visual subset
+          of {editingCatalogueEntry.name}. Its generated RDF reflects this
+          subset; source-only RDF remains intact in the reviewed source.
+        </SourceFidelityNote>
       )}
 
       {/* Split pane */}

@@ -1098,9 +1098,9 @@ function EmbedRdfSource({
             padding: '8px 16px',
           }}
         >
-          Generated from the supported visual subset. Source-only SHACL rules
-          and unsupported triples are available only in the verified catalogue
-          source and are not executed here.
+          Generated from the visual subset, not the complete upstream ontology.
+          Source-only RDF remains in the reviewed source and is not executed
+          here; imports are recorded but not fetched.
         </div>
       )}
       <pre style={{

@@ -113,7 +113,7 @@ describe('ImportExportModal integration', () => {
     expect(standardsProfile.getAttribute('aria-pressed')).toBe('true');
   });
 
-  it('warns when exporting an editable subset of an external ontology', () => {
+  it('explains an external ontology subset without presenting an error', () => {
     useAppStore.getState().loadOntology(
       testOntology,
       [],
@@ -122,11 +122,14 @@ describe('ImportExportModal integration', () => {
 
     render(<ImportExportModal onClose={onClose} />);
 
-    expect(screen.getByRole('note').textContent).toContain(
-      'does not reproduce source-only SHACL rules or unsupported triples',
+    const note = screen.getByRole('note');
+    expect(note.classList.contains('source-fidelity-note')).toBe(true);
+    expect(note.querySelector('.lucide-info')).toBeTruthy();
+    expect(note.textContent).toContain(
+      'About this download',
     );
-    expect(screen.getByRole('note').textContent).toContain(
-      'Download the verified original from the catalogue',
+    expect(note.textContent).toContain(
+      'Source-only RDF remains intact in the reviewed source',
     );
   });
 
