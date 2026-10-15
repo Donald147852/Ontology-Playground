@@ -393,6 +393,18 @@ describe('OntologyGraph adaptive rendering', () => {
         LARGE_GRAPH_RETAINED_HEAP_BUDGET_BYTES,
       );
     }
+
+    fireEvent.change(
+      screen.getByRole('searchbox', { name: 'Jump to an entity' }),
+      { target: { value: 'Node 100' } },
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Find' }));
+    await waitFor(() => {
+      expect(window.__ONTOLOGY_GRAPH_METRICS__?.layoutCount).toBe(2);
+    });
+    expect(
+      window.__ONTOLOGY_GRAPH_METRICS__?.lastInteractionDurationMs,
+    ).toEqual(expect.any(Number));
   });
 
   it('cancels and resumes a scheduled massive graph layout', () => {
