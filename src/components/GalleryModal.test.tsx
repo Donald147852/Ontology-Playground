@@ -422,6 +422,43 @@ describe('GalleryModal', () => {
     expect(window.location.hash).toBe('#/catalogue');
   });
 
+  it('does not enter Designer after browser history leaves the gallery', async () => {
+    const payloadResponse = deferredResponse();
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      if (input.toString().endsWith('/catalogue.json')) {
+        return new Response(JSON.stringify(fakeCatalogue), { status: 200 });
+      }
+      return payloadResponse.promise;
+    });
+    const initialOntology = useAppStore.getState().currentOntology;
+    const initialDraft = useDesignerStore.getState().ontology;
+    const user = userEvent.setup();
+    render(<GalleryModal onClose={onClose} />);
+    await screen.findByText('Fourth Coffee');
+
+    await user.click(screen.getAllByTitle('Edit in Designer')[0]);
+    act(() => {
+      window.history.pushState(null, '', '#/');
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    });
+
+    await act(async () => {
+      payloadResponse.resolve(new Response(
+        JSON.stringify(
+          fakePayloads['official/cosmic-coffee'],
+          null,
+          2,
+        ) + '\n',
+        { status: 200 },
+      ));
+      await payloadResponse.promise;
+    });
+
+    expect(window.location.hash).toBe('#/');
+    expect(useAppStore.getState().currentOntology).toBe(initialOntology);
+    expect(useDesignerStore.getState().ontology).toBe(initialDraft);
+  });
+
   it('surfaces payload failures without loading an empty ontology', async () => {
     mockFetchSuccess(fakeCatalogue, {
       'community/drsmith/hospital-net': 503,

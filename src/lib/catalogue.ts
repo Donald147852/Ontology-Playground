@@ -405,7 +405,7 @@ async function loadCatalogueEntryUncached(
   }
 
   try {
-    return await fetchCatalogueEntry(entry, indexUrl);
+    return await requestCatalogueEntry(entry, indexUrl);
   } catch (error) {
     if (!(error instanceof StaleCataloguePayloadError)) throw error;
 
@@ -420,27 +420,41 @@ async function loadCatalogueEntryUncached(
     ) {
       throw error;
     }
-    return fetchCatalogueEntry(refreshedEntry, indexUrl);
+    return requestCatalogueEntry(refreshedEntry, indexUrl);
   }
 }
 
-export async function loadCatalogueEntry(
-  id: string,
-  baseUrl: string = import.meta.env.BASE_URL,
+function requestCatalogueEntry(
+  entry: CatalogueEntry,
+  indexUrl: string,
 ): Promise<LoadedCatalogueEntry> {
-  const indexUrl = getCatalogueIndexUrl(baseUrl);
-  const cacheKey = `${indexUrl}#${id}`;
+  const cacheKey = [
+    indexUrl,
+    entry.id,
+    entry.payloadHash,
+    JSON.stringify(entry),
+  ].join('#');
   const cached = entryRequests.get(cacheKey);
   if (cached) return cached;
 
-  const request = loadCatalogueEntryUncached(id, baseUrl, indexUrl)
+  const request = fetchCatalogueEntry(entry, indexUrl)
     .catch((error) => {
-      entryRequests.delete(cacheKey);
+      if (entryRequests.get(cacheKey) === request) {
+        entryRequests.delete(cacheKey);
+      }
       throw error;
     });
 
   entryRequests.set(cacheKey, request);
   return request;
+}
+
+export function loadCatalogueEntry(
+  id: string,
+  baseUrl: string = import.meta.env.BASE_URL,
+): Promise<LoadedCatalogueEntry> {
+  const indexUrl = getCatalogueIndexUrl(baseUrl);
+  return loadCatalogueEntryUncached(id, baseUrl, indexUrl);
 }
 
 export function clearCatalogueCache(): void {

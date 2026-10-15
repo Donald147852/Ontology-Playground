@@ -200,6 +200,72 @@ describe('catalogue loader', () => {
     expect(fetchMock.mock.calls[2][1]).toMatchObject({ cache: 'no-store' });
   });
 
+  it('uses the refreshed index generation for previously cached entries', async () => {
+    const oldContent = payloadContent();
+    const updatedContent = payloadContent({
+      ...payload,
+      ontology: {
+        ...payload.ontology,
+        name: 'Updated Ontology',
+      },
+    });
+    const addedPayload: CatalogueEntryPayload = {
+      ...payload,
+      id: 'official/added',
+      ontology: {
+        ...payload.ontology,
+        name: 'Added Ontology',
+      },
+    };
+    const addedContent = payloadContent(addedPayload);
+    const oldCatalogue = createCatalogue(oldContent);
+    const updatedCatalogue = createCatalogue(updatedContent);
+    const addedHash = payloadHash(addedContent);
+    updatedCatalogue.entries.push({
+      ...updatedCatalogue.entries[0],
+      id: addedPayload.id,
+      name: addedPayload.ontology.name,
+      payloadUrl:
+        `catalogue-payloads/official/added/${addedHash.slice('sha256:'.length)}.json`,
+      payloadHash: addedHash,
+    });
+    updatedCatalogue.count = updatedCatalogue.entries.length;
+    let indexRequests = 0;
+    let payloadRequests = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = input.toString();
+      if (url.endsWith('/catalogue.json')) {
+        indexRequests++;
+        return response(JSON.stringify(
+          indexRequests === 1 ? oldCatalogue : updatedCatalogue,
+        ));
+      }
+      payloadRequests++;
+      if (url.endsWith(oldCatalogue.entries[0].payloadUrl)) {
+        return response(oldContent);
+      }
+      if (url.endsWith(updatedCatalogue.entries[0].payloadUrl)) {
+        return response(updatedContent);
+      }
+      return response(addedContent);
+    });
+
+    const oldEntry = await loadCatalogueEntry(
+      'official/test',
+      '/playground/',
+    );
+    await loadCatalogueEntry('official/added', '/playground/');
+    const refreshedEntry = await loadCatalogueEntry(
+      'official/test',
+      '/playground/',
+    );
+
+    expect(oldEntry.ontology.name).toBe('Test Ontology');
+    expect(refreshedEntry.ontology.name).toBe('Updated Ontology');
+    expect(indexRequests).toBe(2);
+    expect(payloadRequests).toBe(3);
+  });
+
   it('allows retry after a stale-index refresh fails', async () => {
     const oldContent = payloadContent();
     const updatedContent = payloadContent({

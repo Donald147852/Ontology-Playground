@@ -47,7 +47,10 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
   useEffect(() => {
     const syncFiltersFromHash = () => {
       const route = parseHash(window.location.hash);
-      if (route.page !== 'catalogue') return;
+      if (route.page !== 'catalogue' || route.ontologyId) {
+        latestActionRef.current++;
+        return;
+      }
       setCategoryFilter(route.category ?? 'all');
       setSourceFilter((route.source as SourceFilter) ?? 'all');
     };
