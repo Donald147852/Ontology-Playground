@@ -223,6 +223,21 @@ npm test            # single run
 npm run test:watch  # watch mode
 ```
 
+### Validating RDF
+
+```bash
+npm run validate
+npm run validate -- catalogue/external/brick-schema/brick/ontology.rdf
+npm run validate -- --profile external path/to/standalone.rdf
+```
+
+Validation discovers all official, community, and external catalogue entries.
+Official and community entries use the strict Designer profile. External
+standards use structural, safety, provenance, and resource checks while
+reporting incompatible Designer conventions as aggregated warnings. Standalone
+external files require a companion `metadata.json`; validation never fetches or
+dereferences external resources.
+
 ## Deployment
 
 ### GitHub Pages (official)

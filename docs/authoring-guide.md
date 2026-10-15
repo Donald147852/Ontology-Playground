@@ -238,7 +238,7 @@ Every catalogue ontology needs a `metadata.json` alongside the `.rdf` file:
 |-------|----------|-------|
 | `name` | Yes | Same as the ontology's `name` field |
 | `description` | Yes | Short description for the gallery card |
-| `category` | Yes | One of: `retail`, `healthcare`, `finance`, `manufacturing`, `education`, `technology`, `general`, `fibo` |
+| `category` | Yes | One of: `retail`, `healthcare`, `finance`, `manufacturing`, `education`, `food`, `media`, `events`, `technology`, `general`, `iq-lab`, `school`, `fibo` |
 | `icon` | No | Emoji for the gallery card. Defaults to a generic icon |
 | `tags` | No | Array of strings for filtering. Keep them lowercase |
 | `author` | No | Your GitHub username. Shown in the gallery |
@@ -249,6 +249,35 @@ Every catalogue ontology needs a `metadata.json` alongside the `.rdf` file:
 Community entries adapted from another open project should also provide
 `license`, `sourceUrl`, and `version` when known. Original community entries
 may omit them. The compiler rejects non-HTTPS source links.
+
+### Tier-aware validation
+
+Run `npm run validate` to validate built-in examples and every official,
+community, and external catalogue entry. The catalogue compiler applies the
+same tier selection and core checks:
+
+- **Official and community** entries use the strict Designer profile, including
+  identifier-property and Fabric naming requirements.
+- **External** entries must have stable class and relationship identifiers,
+  valid relationship endpoints, safe metadata, an HTTPS source URL, a license,
+  valid UTF-8 RDF/XML, and remain within source and graph resource limits.
+  Missing Designer identifiers and incompatible display labels are summarized
+  as compatibility warnings instead of thousands of repeated errors.
+- Validation rejects `DOCTYPE` and `ENTITY` declarations and does not fetch or
+  dereference `owl:imports` or any other external resource.
+
+Paths under `catalogue/` select their profile automatically:
+
+```bash
+npm run validate -- catalogue/external/brick-schema/brick/ontology.rdf
+```
+
+For a standalone external file, select the profile explicitly and place a
+valid `metadata.json` beside it:
+
+```bash
+npm run validate -- --profile external path/to/ontology.rdf
+```
 
 ---
 
@@ -332,7 +361,8 @@ ontology (e.g., `catalogue/official/cosmic-coffee/cosmic-coffee.rdf`).
    Loan?"
 3. Check the inspector: click each node and edge
 4. Switch to RDF Source tab: does it look clean?
-5. Run validation: `npm run validate -- path/to/your-ontology.rdf`
+5. Run validation: `npm run validate -- path/to/your-ontology.rdf`. Add
+   `--profile external` for a standalone external standard.
 
 ### Step 7: Submit
 

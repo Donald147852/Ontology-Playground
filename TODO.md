@@ -177,11 +177,16 @@ into a static JSON file.
   (`"source": "gist:<gist-id>"`) and fetching them at build time
   (optional, evaluate complexity vs. value)
 - [x] **RDF validation in CI** — use `npm run validate` (backed by
-  `scripts/validate-rdf.ts`) in a GitHub Actions step to gate community
-  PRs. The script already validates all catalogue RDF files and can
-  validate specific files via `npm run validate -- path/to/file.rdf`.
-  Wire it into the PR validation workflow so invalid ontologies are
-  rejected before merge.
+  `scripts/validate-rdf.ts`) in a GitHub Actions step to gate catalogue
+  PRs. The script validates all official, community, and external catalogue
+  entries and can validate specific files via
+  `npm run validate -- path/to/file.rdf`.
+  - [x] Share hardened all-tier discovery and core validation with the
+    catalogue compiler.
+  - [x] Keep official/community validation strict while treating
+    Designer-only external-standard differences as concise warnings.
+  - [x] Enforce external provenance, active-XML rejection, UTF-8 and resource
+    limits without dereferencing external resources.
 - [ ] **Contribution CTA link** — Add a "Want to contribute? See
   CONTRIBUTING.md" button/link in the gallery or footer that points
   directly to the GitHub repo fork/PR flow. Link should be:
