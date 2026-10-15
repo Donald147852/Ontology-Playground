@@ -2,6 +2,7 @@ import {
   mkdirSync,
   mkdtempSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -332,6 +333,38 @@ describe('catalogue profile discovery', () => {
       filePath,
     ], root)).toBe(1);
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'binds filesystem aliases to the discovered catalogue tier',
+    () => {
+      const root = createTemporaryRoot();
+      writeEntry(
+        root,
+        'external/example/standard',
+        EXTERNAL_RDF,
+        externalMetadata(),
+      );
+      const alias = join(root, 'catalogue-alias');
+      symlinkSync(join(root, 'catalogue'), alias, 'dir');
+      const aliasedFile = join(
+        alias,
+        'external',
+        'example',
+        'standard',
+        'ontology.rdf',
+      );
+      silenceConsole();
+
+      expect(runValidationCli([
+        '--profile',
+        'external',
+        aliasedFile,
+      ], root)).toBe(1);
+      expect(runValidationCli([
+        aliasedFile,
+      ], root)).toBe(0);
+    },
+  );
 
   it('requires metadata for explicitly validated catalogue entries', () => {
     const root = createTemporaryRoot();

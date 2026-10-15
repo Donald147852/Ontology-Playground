@@ -9,6 +9,7 @@
 import {
   lstatSync,
   readFileSync,
+  realpathSync,
   readdirSync,
 } from 'node:fs';
 import {
@@ -177,6 +178,17 @@ function isPathWithin(root: string, path: string): boolean {
     && !isAbsolute(relativePath);
 }
 
+function canonicalPath(path: string): string | undefined {
+  try {
+    return realpathSync.native(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
 function findAuthoredRdfFiles(directory: string): string[] {
   const files: string[] = [];
   let entries;
@@ -303,16 +315,42 @@ export function runValidationCli(
   let failed = 0;
 
   if (parsedArguments.files.length > 0) {
-    const filePaths = parsedArguments.files.map(
-      (argument) => resolve(cwd, argument),
-    );
     const catalogueRoot = join(cwd, 'catalogue');
+    let canonicalCatalogueRoot: string | undefined;
+    let inputFiles: {
+      canonicalFilePath?: string;
+      filePath: string;
+      isCatalogue: boolean;
+    }[];
+    try {
+      canonicalCatalogueRoot = canonicalPath(catalogueRoot);
+      inputFiles = parsedArguments.files.map((argument) => {
+        const filePath = resolve(cwd, argument);
+        const canonicalFilePath = canonicalPath(filePath);
+        return {
+          canonicalFilePath,
+          filePath,
+          isCatalogue: isPathWithin(catalogueRoot, filePath)
+            || Boolean(
+              canonicalCatalogueRoot
+              && canonicalFilePath
+              && isPathWithin(
+                canonicalCatalogueRoot,
+                canonicalFilePath,
+              ),
+            ),
+        };
+      });
+    } catch (error) {
+      console.error((error as Error).message);
+      return 1;
+    }
+
     let catalogueDiscovery:
       | ReturnType<typeof discoverCatalogueSources>
       | undefined;
 
-    if (filePaths.some((filePath) =>
-      isPathWithin(catalogueRoot, filePath))) {
+    if (inputFiles.some((input) => input.isCatalogue)) {
       try {
         catalogueDiscovery = discoverCatalogueSources(catalogueRoot);
       } catch (error) {
@@ -321,9 +359,10 @@ export function runValidationCli(
       }
     }
 
-    for (const filePath of filePaths) {
+    for (const input of inputFiles) {
+      const { filePath } = input;
       let report: ValidationReport;
-      if (isPathWithin(catalogueRoot, filePath)) {
+      if (input.isCatalogue) {
         if (parsedArguments.profile !== undefined) {
           report = {
             errors: [validationIssue(
@@ -342,23 +381,41 @@ export function runValidationCli(
             warnings: [],
           };
         } else {
-          const source = catalogueDiscovery?.sources.find(
-            (candidate) => resolve(candidate.rdfPath) === filePath,
-          );
-          report = source
-            ? validateCatalogueSource(source)
-            : {
-                errors: [validationIssue(
-                  'catalogue-source',
-                  `${filePath}: file is not a discoverable catalogue RDF source.`,
-                )],
-                warnings: [],
-              };
+          const requestedCanonicalPath =
+            input.canonicalFilePath ?? filePath;
+          try {
+            const source = catalogueDiscovery?.sources.find(
+              (candidate) =>
+                canonicalPath(candidate.rdfPath)
+                === requestedCanonicalPath,
+            );
+            report = source
+              ? validateCatalogueSource(source)
+              : {
+                  errors: [validationIssue(
+                    'catalogue-source',
+                    `${filePath}: file is not a discoverable catalogue RDF source.`,
+                  )],
+                  warnings: [],
+                };
+          } catch (error) {
+            report = {
+              errors: [validationIssue(
+                'catalogue-path',
+                (error as Error).message,
+              )],
+              warnings: [],
+            };
+          }
         }
       } else {
         const tier = tierForStandaloneFile(parsedArguments.profile);
-        const rdfReport = validateRdfFile(filePath, tier);
-        const metadataReport = metadataReportForFile(filePath, tier);
+        const standalonePath = input.canonicalFilePath ?? filePath;
+        const rdfReport = validateRdfFile(standalonePath, tier);
+        const metadataReport = metadataReportForFile(
+          standalonePath,
+          tier,
+        );
         report = metadataReport === undefined
           ? rdfReport
           : mergeValidationReports(metadataReport, rdfReport);

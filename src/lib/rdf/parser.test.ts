@@ -275,6 +275,24 @@ describe('parseRDF', () => {
       expect(ontology.relationships[0].to).toBe('bar');
     });
 
+    it('ignores domain and range terms outside the RDFS namespace', () => {
+      const rdf = `<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns:owl="http://www.w3.org/2002/07/owl#"
+         xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+         xmlns:x="https://example.org/not-rdfs#">
+    <owl:Class rdf:about="http://example.org/ontology/test/A"/>
+    <owl:Class rdf:about="http://example.org/ontology/test/B"/>
+    <owl:ObjectProperty rdf:about="http://example.org/ontology/test/related">
+        <x:domain rdf:resource="https://missing.example/A"/>
+        <x:range rdf:resource="https://missing.example/B"/>
+    </owl:ObjectProperty>
+</rdf:RDF>`;
+      const { ontology } = parseRDF(rdf);
+
+      expect(ontology.relationships).toHaveLength(0);
+    });
+
     it('defaults cardinality to one-to-many for invalid values', () => {
       const rdf = `<?xml version="1.0" encoding="UTF-8"?>
 <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"

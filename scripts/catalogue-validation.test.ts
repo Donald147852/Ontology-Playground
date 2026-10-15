@@ -287,6 +287,21 @@ describe('RDF source safety', () => {
     expect(report.warnings).toHaveLength(0);
   });
 
+  it('does not trust literal rdf QNames bound to another namespace', () => {
+    const source = `<r:RDF
+      xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+      xmlns:rdf="https://example.invalid/not-rdf#"
+      xmlns:owl="http://www.w3.org/2002/07/owl#">
+      <r:Description r:about="https://example.org/not-a-restriction">
+        <r:type rdf:resource="http://www.w3.org/2002/07/owl#Restriction"/>
+      </r:Description>
+    </r:RDF>`;
+    const report = validateRdfSource(new TextEncoder().encode(source));
+
+    expect(report.errors).toHaveLength(0);
+    expect(report.warnings).toHaveLength(0);
+  });
+
   it('rejects source IRIs that normalize to order-dependent graph IDs', () => {
     const source = `<rdf:RDF
       xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"

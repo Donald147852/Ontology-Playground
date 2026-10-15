@@ -257,8 +257,7 @@ function getRdfAttribute(
   element: Element,
   localName: string,
 ): string | null {
-  return element.getAttributeNS(RDF_NS, localName)
-    || element.getAttribute(`rdf:${localName}`);
+  return element.getAttributeNS(RDF_NS, localName);
 }
 
 type SourceTypeIndex = ReadonlyMap<string, readonly Element[]>;
