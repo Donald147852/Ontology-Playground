@@ -34,6 +34,8 @@ ontology-preview-publish/
 ontology-preview-comment.md
 internal-docs/
 .vite
+playwright-report/
+test-results/
 release-review/
 data/codemind*.db
 **/codemind*.db

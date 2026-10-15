@@ -51,3 +51,17 @@ jobs:
 
       - name: Build
         run: npx vite build
+
+      - name: Install Chromium for performance budgets
+        run: npx playwright install --with-deps chromium
+
+      - name: Verify large-graph performance budgets
+        run: npm run test:performance
+
+      - name: Upload large-graph performance report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: large-graph-performance-${{ github.run_id }}
+          path: test-results/large-graph
+          if-no-files-found: error
