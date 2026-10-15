@@ -1,120 +1,390 @@
 /**
- * validate-rdf.ts — Validate RDF ontology files
+ * Validates authored and externally sourced RDF/OWL using tier-aware profiles.
  *
  * Usage:
- *   npx tsx scripts/validate-rdf.ts                     # validate all catalogue + built-in ontologies
- *   npx tsx scripts/validate-rdf.ts file1.rdf file2.rdf # validate specific RDF files
- *
- * Exit code 0 = all valid, 1 = one or more failures.
- * Suitable for CI (e.g., GitHub Actions) to gate community PRs.
+ *   npm run validate
+ *   npm run validate -- path/to/file.rdf
+ *   npm run validate -- --profile external path/to/file.rdf
  */
-
+import {
+  lstatSync,
+  readFileSync,
+  readdirSync,
+} from 'node:fs';
+import {
+  dirname,
+  join,
+  relative,
+  resolve,
+  sep,
+} from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { JSDOM } from 'jsdom';
-// Polyfill DOMParser for Node.js
-const dom = new JSDOM();
-(globalThis as Record<string, unknown>).DOMParser = dom.window.DOMParser;
+import { sampleOntologies } from '../src/data/sampleOntologies.js';
+import {
+  cosmicCoffeeOntology,
+  type Ontology,
+} from '../src/data/ontology.js';
+import { parseRDF } from '../src/lib/rdf/parser.js';
+import {
+  type CatalogueTier,
+  type ValidationIssue,
+  type ValidationReport,
+  mergeValidationReports,
+  validateCatalogueMetadata,
+  validateOntologyForTier,
+  validateRdfSource,
+} from './catalogue-validation.js';
+import {
+  CatalogueDiscoveryError,
+  discoverCatalogueSources,
+} from './compile-catalogue.js';
 
-import { parseRDF } from '../src/lib/rdf/parser';
-import { validateOntology } from '../src/store/designerStore';
-import { validateOntologyStyle } from './style-validator';
-import { cosmicCoffeeOntology } from '../src/data/ontology';
-import { sampleOntologies } from '../src/data/sampleOntologies';
-import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
-import { join, basename } from 'path';
+const dom = new JSDOM('');
+globalThis.DOMParser = dom.window.DOMParser;
 
-let failures = 0;
+type CliProfile = CatalogueTier | 'authored';
 
-function report(label: string, errors: { message: string }[]) {
-  if (errors.length) {
-    failures++;
-    console.log(`FAIL  ${label}`);
-    for (const e of errors) console.log(`        ${e.message}`);
-  } else {
-    console.log(`  OK  ${label}`);
+export interface RdfFileValidation extends ValidationReport {
+  ontology?: Ontology;
+}
+
+interface ParsedArguments {
+  files: string[];
+  profile?: CliProfile;
+  showHelp: boolean;
+}
+
+function validationIssue(
+  code: string,
+  message: string,
+): ValidationIssue {
+  return { severity: 'error', code, message };
+}
+
+function decodeUtf8(bytes: Uint8Array, path: string): string {
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    throw new Error(`${path}: file must be valid UTF-8`);
   }
 }
 
-function reportStyle(label: string, errors: { message: string; severity: string }[]) {
-  if (errors.length) {
-    const hasErrors = errors.some(e => e.severity === 'error');
-    if (hasErrors) {
-      failures++;
-      console.log(`FAIL  ${label} (style)`);      
-    } else {
-      console.log(`WARN  ${label} (style)`);
-    }
-    for (const e of errors) {
-      const prefix = e.severity === 'error' ? '  ✘' : '  ⚠';
-      console.log(`${prefix} ${e.message}`);
-    }
+function validateRdfBytes(
+  sourceBytes: Uint8Array,
+  tier: CatalogueTier,
+): RdfFileValidation {
+  const sourceReport = validateRdfSource(sourceBytes);
+  if (sourceReport.errors.length > 0 || sourceReport.text === undefined) {
+    return sourceReport;
+  }
+
+  try {
+    const { ontology } = parseRDF(sourceReport.text);
+    const report = mergeValidationReports(
+      sourceReport,
+      validateOntologyForTier(ontology, tier),
+    );
+    return { ...report, ontology };
+  } catch (error) {
+    return {
+      errors: [
+        ...sourceReport.errors,
+        validationIssue('rdf-parse', (error as Error).message),
+      ],
+      warnings: sourceReport.warnings,
+    };
   }
 }
 
-function validateRdfFile(filePath: string, checkStyle = true) {
-  const rdf = readFileSync(filePath, 'utf-8');
-  const { ontology } = parseRDF(rdf);
-  const errors = validateOntology(ontology);
-  report(basename(filePath), errors);
-  
-  if (checkStyle) {
-    const styleErrors = validateOntologyStyle(ontology);
-    if (styleErrors.length > 0) {
-      reportStyle(basename(filePath), styleErrors);
-    }
+function readStandaloneFile(path: string): Buffer {
+  const stat = lstatSync(path);
+  if (stat.isSymbolicLink()) {
+    throw new Error(`${path}: symlinks are not accepted for RDF validation`);
+  }
+  if (!stat.isFile()) {
+    throw new Error(`${path}: expected a regular file`);
+  }
+  return readFileSync(path);
+}
+
+export function validateRdfFile(
+  filePath: string,
+  tier: CatalogueTier = 'official',
+): RdfFileValidation {
+  try {
+    return validateRdfBytes(readStandaloneFile(filePath), tier);
+  } catch (error) {
+    return {
+      errors: [validationIssue('file-read', (error as Error).message)],
+      warnings: [],
+    };
   }
 }
 
-// --- Mode: validate specific files passed as CLI args ---
-const args = process.argv.slice(2);
-if (args.length > 0) {
-  for (const file of args) {
-    if (!existsSync(file)) {
-      console.error(`File not found: ${file}`);
-      failures++;
+function parseArguments(args: string[]): ParsedArguments {
+  const parsed: ParsedArguments = {
+    files: [],
+    showHelp: false,
+  };
+
+  for (let index = 0; index < args.length; index++) {
+    const argument = args[index];
+    if (argument === '--help' || argument === '-h') {
+      parsed.showHelp = true;
       continue;
     }
-    validateRdfFile(file);
-  }
-} else {
-  // --- Mode: validate all built-in + catalogue ontologies ---
-
-  // 1. Built-in TS ontology objects
-  report('Fourth Coffee (built-in)', validateOntology(cosmicCoffeeOntology));
-  for (const s of sampleOntologies) {
-    report(`${s.name} (built-in)`, validateOntology(s.ontology));
-  }
-
-  // 2. Catalogue RDF files
-  const catalogueDir = join(process.cwd(), 'catalogue/official');
-  if (existsSync(catalogueDir)) {
-    for (const dir of readdirSync(catalogueDir)) {
-      const dirPath = join(catalogueDir, dir);
-      if (!statSync(dirPath).isDirectory()) continue;
-      for (const f of readdirSync(dirPath).filter(f => f.endsWith('.rdf'))) {
-        validateRdfFile(join(dirPath, f));
+    if (argument === '--profile') {
+      const profile = args[++index];
+      if (
+        profile !== 'authored'
+        && profile !== 'official'
+        && profile !== 'community'
+        && profile !== 'external'
+      ) {
+        throw new Error(
+          '--profile must be one of: authored, official, community, external',
+        );
       }
+      parsed.profile = profile;
+      continue;
+    }
+    if (argument.startsWith('-')) {
+      throw new Error(`Unknown option "${argument}".`);
+    }
+    parsed.files.push(argument);
+  }
+
+  return parsed;
+}
+
+function tierForFile(
+  filePath: string,
+  cwd: string,
+  profile?: CliProfile,
+): CatalogueTier {
+  if (profile !== undefined) {
+    return profile === 'authored' ? 'official' : profile;
+  }
+
+  const relativePath = relative(cwd, filePath).split(sep).join('/');
+  const match = /^catalogue\/(official|community|external)\//.exec(
+    relativePath,
+  );
+  if (
+    match?.[1] === 'official'
+    || match?.[1] === 'community'
+    || match?.[1] === 'external'
+  ) {
+    return match[1];
+  }
+  return 'official';
+}
+
+function findAuthoredRdfFiles(directory: string): string[] {
+  const files: string[] = [];
+  let entries;
+  try {
+    entries = readdirSync(directory, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return files;
+    }
+    throw error;
+  }
+
+  for (const entry of entries) {
+    const fullPath = join(directory, entry.name);
+    if (entry.isSymbolicLink()) {
+      throw new Error(
+        `${fullPath}: symlinks are not accepted for RDF validation`,
+      );
+    }
+    if (entry.isDirectory()) {
+      files.push(...findAuthoredRdfFiles(fullPath));
+    } else if (
+      entry.isFile()
+      && (entry.name.endsWith('.rdf') || entry.name.endsWith('.owl'))
+    ) {
+      files.push(fullPath);
     }
   }
 
-  const communityDir = join(process.cwd(), 'catalogue/community');
-  if (existsSync(communityDir)) {
-    for (const user of readdirSync(communityDir)) {
-      const userDir = join(communityDir, user);
-      if (!statSync(userDir).isDirectory()) continue;
-      for (const slug of readdirSync(userDir)) {
-        const slugDir = join(userDir, slug);
-        if (!statSync(slugDir).isDirectory()) continue;
-        for (const f of readdirSync(slugDir).filter(f => f.endsWith('.rdf') || f.endsWith('.owl'))) {
-          validateRdfFile(join(slugDir, f));
-        }
-      }
+  return files.sort();
+}
+
+function metadataReportForFile(
+  filePath: string,
+  tier: CatalogueTier,
+): ValidationReport | undefined {
+  const metadataPath = join(dirname(filePath), 'metadata.json');
+  try {
+    const metadata = JSON.parse(
+      decodeUtf8(readStandaloneFile(metadataPath), metadataPath),
+    ) as unknown;
+    return validateCatalogueMetadata(metadata, tier);
+  } catch (error) {
+    if (
+      tier !== 'external'
+      && (error as NodeJS.ErrnoException).code === 'ENOENT'
+    ) {
+      return undefined;
     }
+    return {
+      errors: [
+        validationIssue('metadata-read', (error as Error).message),
+      ],
+      warnings: [],
+    };
   }
 }
 
-if (failures > 0) {
-  console.log(`\n✘ ${failures} file(s) failed validation`);
-  process.exit(1);
-} else {
-  console.log(`\n✔ All files valid`);
+function printResult(
+  label: string,
+  report: ValidationReport,
+): boolean {
+  if (report.errors.length === 0) {
+    console.log(`  OK  ${label}`);
+  } else {
+    console.log(`FAIL  ${label}`);
+  }
+  for (const error of report.errors) {
+    console.log(`        ERROR [${error.code}] ${error.message}`);
+  }
+  for (const warning of report.warnings) {
+    console.log(`        WARN  [${warning.code}] ${warning.message}`);
+  }
+  return report.errors.length === 0;
+}
+
+function printUsage(): void {
+  console.log(
+    'Usage: npm run validate -- [--profile authored|official|community|external] [file.rdf ...]',
+  );
+}
+
+export function runValidationCli(
+  args: string[] = process.argv.slice(2),
+  cwd: string = process.cwd(),
+): number {
+  let parsedArguments: ParsedArguments;
+  try {
+    parsedArguments = parseArguments(args);
+  } catch (error) {
+    console.error((error as Error).message);
+    printUsage();
+    return 1;
+  }
+
+  if (parsedArguments.showHelp) {
+    printUsage();
+    return 0;
+  }
+
+  let failed = 0;
+
+  if (parsedArguments.files.length > 0) {
+    for (const argument of parsedArguments.files) {
+      const filePath = resolve(cwd, argument);
+      const tier = tierForFile(
+        filePath,
+        cwd,
+        parsedArguments.profile,
+      );
+      const rdfReport = validateRdfFile(filePath, tier);
+      const metadataReport = metadataReportForFile(filePath, tier);
+      const report = metadataReport === undefined
+        ? rdfReport
+        : mergeValidationReports(metadataReport, rdfReport);
+      if (!printResult(relative(cwd, filePath) || filePath, report)) {
+        failed++;
+      }
+    }
+  } else {
+    const cosmicCoffeeReport = validateOntologyForTier(
+      cosmicCoffeeOntology,
+      'official',
+    );
+    if (!printResult('Fourth Coffee (built-in)', cosmicCoffeeReport)) {
+      failed++;
+    }
+
+    for (const sample of sampleOntologies) {
+      const report = validateOntologyForTier(sample.ontology, 'official');
+      if (!printResult(`${sample.name} (built-in)`, report)) {
+        failed++;
+      }
+    }
+
+    try {
+      for (const directory of [
+        join(cwd, 'src', 'data', 'rdf'),
+        join(cwd, 'content', 'learn'),
+      ]) {
+        for (const filePath of findAuthoredRdfFiles(directory)) {
+          const report = validateRdfFile(filePath, 'official');
+          if (!printResult(relative(cwd, filePath), report)) {
+            failed++;
+          }
+        }
+      }
+
+      const discovery = discoverCatalogueSources(
+        join(cwd, 'catalogue'),
+      );
+      for (const discoveryError of discovery.errors) {
+        if (!printResult(discoveryError, {
+          errors: [
+            validationIssue('catalogue-discovery', discoveryError),
+          ],
+          warnings: [],
+        })) {
+          failed++;
+        }
+      }
+
+      for (const source of discovery.sources) {
+        let report: ValidationReport;
+        try {
+          const metadata = JSON.parse(decodeUtf8(
+            source.readMetadata(),
+            source.metadataPath,
+          )) as unknown;
+          report = mergeValidationReports(
+            validateCatalogueMetadata(metadata, source.tier),
+            validateRdfBytes(source.readRdf(), source.tier),
+          );
+        } catch (error) {
+          if (error instanceof CatalogueDiscoveryError) throw error;
+          report = {
+            errors: [
+              validationIssue('catalogue-read', (error as Error).message),
+            ],
+            warnings: [],
+          };
+        }
+        if (!printResult(relative(cwd, source.rdfPath), report)) {
+          failed++;
+        }
+      }
+    } catch (error) {
+      console.error((error as Error).message);
+      failed++;
+    }
+  }
+
+  if (failed > 0) {
+    console.log(`\n✘ ${failed} file(s) failed validation`);
+    return 1;
+  }
+
+  console.log('\n✔ All files valid');
+  return 0;
+}
+
+if (
+  process.argv[1]
+  && fileURLToPath(import.meta.url) === resolve(process.argv[1])
+) {
+  process.exitCode = runValidationCli();
 }
