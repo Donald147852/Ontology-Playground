@@ -217,7 +217,13 @@ describe('RDF round-trip tests', () => {
 
     const rdf = serializeToRDF(ontology);
     expect(rdf).toContain(
-      '<owl:Ontology rdf:about="https://example.org/semantic-fidelity">',
+      '<owl:Ontology rdf:about="http://example.org/ontology/semantic-fidelity/">',
+    );
+    expect(rdf).toContain(
+      '<dcterms:source rdf:resource="https://example.org/semantic-fidelity"/>',
+    );
+    expect(rdf).toContain(
+      '<opmeta:sourceVersionIri rdf:resource="https://example.org/semantic-fidelity/1.0"/>',
     );
     expect(rdf).toContain(
       '<rdfs:subClassOf rdf:resource="http://example.org/ontology/semantic-fidelity/Parent"/>',
@@ -226,8 +232,12 @@ describe('RDF round-trip tests', () => {
       '<owl:ObjectProperty rdf:about="http://example.org/ontology/semantic-fidelity/child-related-parent">',
     );
     expect(rdf).toContain(
-      '<owl:imports rdf:resource="https://example.org/imported"/>',
+      '<opmeta:sourceImport rdf:resource="https://example.org/imported"/>',
     );
+    expect(rdf).not.toContain(
+      '<owl:Ontology rdf:about="https://example.org/semantic-fidelity">',
+    );
+    expect(rdf).not.toContain('<owl:imports');
 
     const { ontology: parsed } = parseRDF(rdf);
     expectOntologiesEqual(parsed, ontology);

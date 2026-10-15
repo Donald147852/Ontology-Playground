@@ -62,7 +62,10 @@ of treating Playground metadata as Fabric vocabulary. Imported class
 hierarchies remain `rdfs:subClassOf` statements on export and are not
 misrepresented as Fabric relationship types. Ontology IRI, version IRI,
 version information, license, and `owl:imports` declarations are retained in
-the editable model and generated RDF; imports are recorded but never fetched.
+the editable model and recorded as source provenance in generated RDF; imports
+are recorded but never fetched. Generated subsets use their own derived
+ontology identity rather than claiming to be the authoritative upstream
+version.
 For external standards, the graph, Designer, generated exports, and embed RDF
 tab are explicitly labelled as a supported visual subset. Use the catalogue's
 verified original download when source-only semantics such as SHACL rules must

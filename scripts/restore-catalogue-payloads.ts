@@ -4,8 +4,10 @@ import {
   lstatSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   renameSync,
   rmSync,
+  rmdirSync,
   writeFileSync,
 } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
@@ -223,6 +225,77 @@ function hasExpectedContent(path: string, expectedHash: string): boolean {
   return expectedHash === `sha256:${actualHash}`;
 }
 
+function pruneUnpublishedAssets(
+  outputDirectory: string,
+  directoryName: 'catalogue-payloads' | 'catalogue-sources',
+  publishedUrls: Set<string>,
+): void {
+  const assetRoot = resolve(outputDirectory, directoryName);
+  if (!existsSync(assetRoot)) return;
+  const rootStat = lstatSync(assetRoot);
+  if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
+    throw new Error(
+      `Cached catalogue artifact root must be a directory: ${assetRoot}`,
+    );
+  }
+
+  const visit = (directory: string, prefix: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const relativePath = prefix
+        ? `${prefix}/${entry.name}`
+        : entry.name;
+      const entryPath = resolve(directory, entry.name);
+      if (!entryPath.startsWith(`${assetRoot}${sep}`)) {
+        throw new Error(
+          `Unsafe cached catalogue artifact: ${relativePath}`,
+        );
+      }
+      if (entry.isSymbolicLink()) {
+        throw new Error(
+          `Cached catalogue artifacts cannot contain symlinks: ${relativePath}`,
+        );
+      }
+      if (entry.isDirectory()) {
+        visit(entryPath, relativePath);
+        if (readdirSync(entryPath).length === 0) {
+          rmdirSync(entryPath);
+        }
+        continue;
+      }
+      if (!entry.isFile()) {
+        throw new Error(
+          `Unsupported cached catalogue artifact: ${relativePath}`,
+        );
+      }
+
+      const publishedUrl = `${directoryName}/${relativePath}`;
+      if (!publishedUrls.has(publishedUrl)) {
+        rmSync(entryPath);
+      }
+    }
+  };
+
+  visit(assetRoot, '');
+  if (readdirSync(assetRoot).length === 0) {
+    rmdirSync(assetRoot);
+  }
+}
+
+function clearUnpublishedCatalogueCache(
+  outputDirectory: string,
+): void {
+  pruneUnpublishedAssets(
+    outputDirectory,
+    'catalogue-payloads',
+    new Set(),
+  );
+  pruneUnpublishedAssets(
+    outputDirectory,
+    'catalogue-sources',
+    new Set(),
+  );
+}
+
 async function restorePayload(
   entry: CataloguePayloadManifestEntry,
   publishedBaseUrl: URL,
@@ -384,6 +457,7 @@ export async function restoreCataloguePayloads(
     );
   }
   if (indexResponse.status === 404) {
+    clearUnpublishedCatalogueCache(outputDirectory);
     console.log('No published catalogue found; starting payload history');
     return 0;
   }
@@ -398,6 +472,7 @@ export async function restoreCataloguePayloads(
     'published catalogue index',
   );
   if (!isRecord(indexValue) || indexValue.schemaVersion !== 2) {
+    clearUnpublishedCatalogueCache(outputDirectory);
     console.log('Published catalogue predates payload history; starting fresh');
     return 0;
   }
@@ -428,6 +503,16 @@ export async function restoreCataloguePayloads(
     'published catalogue payload manifest',
   ));
   validateCurrentIndex(indexValue, manifest);
+  pruneUnpublishedAssets(
+    outputDirectory,
+    'catalogue-payloads',
+    new Set(manifest.payloads.map((entry) => entry.payloadUrl)),
+  );
+  pruneUnpublishedAssets(
+    outputDirectory,
+    'catalogue-sources',
+    new Set(manifest.sources.map((entry) => entry.sourceArtifactUrl)),
+  );
 
   let downloaded = 0;
   for (

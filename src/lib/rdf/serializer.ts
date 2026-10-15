@@ -39,6 +39,10 @@ const PLAYGROUND_ANNOTATIONS = {
   toEntityId: 'Playground ID of a relationship target entity.',
   relationshipAttributeOf: 'Playground ID of the relationship described by an attribute.',
   attributeType: 'Playground relationship attribute type: string, integer, decimal, double, date, datetime, boolean, or enum.',
+  generatedSubset: 'Whether this RDF document was generated from the Playground visual model.',
+  sourceVersionIri: 'Version IRI of the source ontology represented by the visual model.',
+  sourceVersionInfo: 'Version label of the source ontology represented by the visual model.',
+  sourceImport: 'Import IRI recorded from the source ontology without dereferencing it.',
   boundClass: 'Domain class targeted by a Playground data binding.',
   boundEntityId: 'Playground entity ID targeted by a data binding.',
   source: 'Source name retained by a Playground data binding.',
@@ -97,17 +101,20 @@ function serializeOntologyDeclaration(
   baseUri: string,
 ): string {
   const metadata = ontology.rdfMetadata;
-  const ontologyIri = metadata?.ontologyIri || baseUri;
-  let rdf = `    <owl:Ontology rdf:about="${escapeXml(ontologyIri)}">\n`;
+  let rdf = `    <owl:Ontology rdf:about="${escapeXml(baseUri)}">\n`;
   rdf += `        <rdfs:label>${escapeXml(ontology.name)}</rdfs:label>\n`;
   if (ontology.description) {
     rdf += `        <rdfs:comment>${escapeXml(ontology.description)}</rdfs:comment>\n`;
   }
+  rdf += `        <opmeta:generatedSubset rdf:datatype="${XSD_NS}boolean">true</opmeta:generatedSubset>\n`;
+  if (metadata?.ontologyIri) {
+    rdf += `        <dcterms:source rdf:resource="${escapeXml(metadata.ontologyIri)}"/>\n`;
+  }
   if (metadata?.versionIri) {
-    rdf += `        <owl:versionIRI rdf:resource="${escapeXml(metadata.versionIri)}"/>\n`;
+    rdf += `        <opmeta:sourceVersionIri rdf:resource="${escapeXml(metadata.versionIri)}"/>\n`;
   }
   if (metadata?.versionInfo) {
-    rdf += `        <owl:versionInfo>${escapeXml(metadata.versionInfo)}</owl:versionInfo>\n`;
+    rdf += `        <opmeta:sourceVersionInfo>${escapeXml(metadata.versionInfo)}</opmeta:sourceVersionInfo>\n`;
   }
   if (metadata?.license) {
     const license = escapeXml(metadata.license);
@@ -118,7 +125,7 @@ function serializeOntologyDeclaration(
     }
   }
   for (const importedIri of metadata?.imports ?? []) {
-    rdf += `        <owl:imports rdf:resource="${escapeXml(importedIri)}"/>\n`;
+    rdf += `        <opmeta:sourceImport rdf:resource="${escapeXml(importedIri)}"/>\n`;
   }
   rdf += '    </owl:Ontology>\n\n';
   return rdf;
@@ -295,7 +302,7 @@ export function serializeStandardsRDF(ontology: Ontology): string {
   const parentsByEntity = subclassParents(ontology);
   const enumLists: Array<{ prefix: string; values: string[] }> = [];
   let rdf = '<?xml version="1.0" encoding="UTF-8"?>\n';
-  rdf += serializeNamespaces(baseUri, true, false);
+  rdf += serializeNamespaces(baseUri, true, true);
   rdf += serializeOntologyDeclaration(ontology, baseUri);
   rdf += '    <!-- Standards-oriented OWL + SHACL profile. Playground-only UI metadata and bindings are omitted. -->\n\n';
 

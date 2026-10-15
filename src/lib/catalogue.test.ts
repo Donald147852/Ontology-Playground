@@ -63,6 +63,16 @@ function createCatalogue(content = payloadContent()): Catalogue {
   };
 }
 
+function createLegacyCatalogue(content = payloadContent()): Catalogue {
+  const catalogue = createCatalogue(content);
+  const entry = catalogue.entries[0];
+  delete entry.sourceArtifactUrl;
+  delete entry.sourceArtifactHash;
+  delete entry.sourceArtifactByteLength;
+  delete entry.sourceArtifactMediaType;
+  return catalogue;
+}
+
 function response(body: string, status = 200): Response {
   return new Response(body, {
     status,
@@ -104,6 +114,50 @@ describe('catalogue loader', () => {
     expect(fetchMock.mock.calls[0][0].toString()).toMatch(
       /\/published-catalogue\/catalogue\.json$/,
     );
+  });
+
+  it('refreshes a cached legacy schema-v2 index before using it', async () => {
+    const currentCatalogue = createCatalogue();
+    let indexRequests = 0;
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async () => {
+        indexRequests++;
+        return response(JSON.stringify(
+          indexRequests === 1
+            ? createLegacyCatalogue()
+            : currentCatalogue,
+        ));
+      },
+    );
+
+    const catalogue = await loadCatalogueIndex('/playground/');
+
+    expect(catalogue.entries[0].sourceArtifactHash).toBe(sourceHash);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({
+      cache: 'no-store',
+    });
+  });
+
+  it('can load payloads from a legacy index when refresh is still legacy', async () => {
+    const content = payloadContent();
+    let indexRequests = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      if (input.toString().endsWith('/catalogue.json')) {
+        indexRequests++;
+        return response(JSON.stringify(createLegacyCatalogue(content)));
+      }
+      return response(content);
+    });
+
+    const loaded = await loadCatalogueEntry(
+      'official/test',
+      '/playground/',
+    );
+
+    expect(loaded.ontology.name).toBe('Test Ontology');
+    expect(loaded.sourceArtifactUrl).toBeUndefined();
+    expect(indexRequests).toBe(2);
   });
 
   it('loads only the requested entry payload', async () => {
@@ -549,6 +603,18 @@ describe('catalogue loader', () => {
 
     await expect(loadCatalogueIndex('/playground/')).rejects.toThrow(
       'Catalogue entry has invalid payload URL',
+    );
+  });
+
+  it('rejects incomplete source artifact metadata', async () => {
+    const catalogue = createLegacyCatalogue();
+    catalogue.entries[0].sourceArtifactHash = sourceHash;
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      response(JSON.stringify(catalogue)),
+    );
+
+    await expect(loadCatalogueIndex('/playground/')).rejects.toThrow(
+      'Catalogue entry has incomplete source artifact metadata',
     );
   });
 

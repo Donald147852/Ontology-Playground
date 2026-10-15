@@ -25,6 +25,23 @@ const MAX_SOURCE_ARTIFACT_BYTES = 8 * 1024 * 1024;
 class StaleCataloguePayloadError extends CatalogueLoadError {}
 class StaleCatalogueSourceError extends CatalogueLoadError {}
 
+type CatalogueEntryWithSource = CatalogueEntry & Required<Pick<
+  CatalogueEntry,
+  | 'sourceArtifactUrl'
+  | 'sourceArtifactHash'
+  | 'sourceArtifactByteLength'
+  | 'sourceArtifactMediaType'
+>>;
+
+export function hasCatalogueSourceArtifact(
+  entry: CatalogueEntry,
+): entry is CatalogueEntryWithSource {
+  return typeof entry.sourceArtifactUrl === 'string'
+    && typeof entry.sourceArtifactHash === 'string'
+    && typeof entry.sourceArtifactByteLength === 'number'
+    && entry.sourceArtifactMediaType === 'application/rdf+xml';
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
@@ -67,8 +84,6 @@ function parseCatalogueEntry(value: unknown): CatalogueEntry {
     'author',
     'payloadUrl',
     'payloadHash',
-    'sourceArtifactUrl',
-    'sourceArtifactHash',
   ] as const;
   for (const field of requiredStrings) {
     if (typeof value[field] !== 'string' || value[field].length === 0) {
@@ -92,23 +107,6 @@ function parseCatalogueEntry(value: unknown): CatalogueEntry {
   if (!/^sha256:[a-f0-9]{64}$/.test(value.payloadHash as string)) {
     throw new CatalogueLoadError('Catalogue entry has invalid payload hash');
   }
-  if (!/^sha256:[a-f0-9]{64}$/.test(
-    value.sourceArtifactHash as string,
-  )) {
-    throw new CatalogueLoadError(
-      'Catalogue entry has invalid source artifact hash',
-    );
-  }
-  if (
-    !Number.isInteger(value.sourceArtifactByteLength)
-    || (value.sourceArtifactByteLength as number) <= 0
-    || (value.sourceArtifactByteLength as number) > MAX_SOURCE_ARTIFACT_BYTES
-    || value.sourceArtifactMediaType !== 'application/rdf+xml'
-  ) {
-    throw new CatalogueLoadError(
-      'Catalogue entry has invalid source artifact metadata',
-    );
-  }
   if (!isValidCatalogueId(value.id as string)) {
     throw new CatalogueLoadError('Catalogue entry has invalid id');
   }
@@ -119,15 +117,68 @@ function parseCatalogueEntry(value: unknown): CatalogueEntry {
   if (value.payloadUrl !== expectedPayloadUrl) {
     throw new CatalogueLoadError('Catalogue entry has invalid payload URL');
   }
-  const sourceArtifactHash = value.sourceArtifactHash as string;
-  const expectedSourceArtifactUrl =
-    `catalogue-sources/${value.id}/${
-      sourceArtifactHash.slice('sha256:'.length)
-    }.rdf`;
-  if (value.sourceArtifactUrl !== expectedSourceArtifactUrl) {
+  const sourceArtifactFields = [
+    'sourceArtifactUrl',
+    'sourceArtifactHash',
+    'sourceArtifactByteLength',
+    'sourceArtifactMediaType',
+  ] as const;
+  const sourceArtifactFieldCount = sourceArtifactFields.filter(
+    (field) => value[field] !== undefined,
+  ).length;
+  if (
+    sourceArtifactFieldCount !== 0
+    && sourceArtifactFieldCount !== sourceArtifactFields.length
+  ) {
     throw new CatalogueLoadError(
-      'Catalogue entry has invalid source artifact URL',
+      'Catalogue entry has incomplete source artifact metadata',
     );
+  }
+
+  let sourceArtifact: Pick<
+    CatalogueEntry,
+    | 'sourceArtifactUrl'
+    | 'sourceArtifactHash'
+    | 'sourceArtifactByteLength'
+    | 'sourceArtifactMediaType'
+  > = {};
+  if (sourceArtifactFieldCount === sourceArtifactFields.length) {
+    if (
+      typeof value.sourceArtifactUrl !== 'string'
+      || value.sourceArtifactUrl.length === 0
+      || typeof value.sourceArtifactHash !== 'string'
+      || !/^sha256:[a-f0-9]{64}$/.test(value.sourceArtifactHash)
+    ) {
+      throw new CatalogueLoadError(
+        'Catalogue entry has invalid source artifact identity',
+      );
+    }
+    if (
+      !Number.isInteger(value.sourceArtifactByteLength)
+      || (value.sourceArtifactByteLength as number) <= 0
+      || (value.sourceArtifactByteLength as number)
+        > MAX_SOURCE_ARTIFACT_BYTES
+      || value.sourceArtifactMediaType !== 'application/rdf+xml'
+    ) {
+      throw new CatalogueLoadError(
+        'Catalogue entry has invalid source artifact metadata',
+      );
+    }
+    const expectedSourceArtifactUrl =
+      `catalogue-sources/${value.id}/${
+        value.sourceArtifactHash.slice('sha256:'.length)
+      }.rdf`;
+    if (value.sourceArtifactUrl !== expectedSourceArtifactUrl) {
+      throw new CatalogueLoadError(
+        'Catalogue entry has invalid source artifact URL',
+      );
+    }
+    sourceArtifact = {
+      sourceArtifactUrl: value.sourceArtifactUrl,
+      sourceArtifactHash: value.sourceArtifactHash,
+      sourceArtifactByteLength: value.sourceArtifactByteLength as number,
+      sourceArtifactMediaType: value.sourceArtifactMediaType,
+    };
   }
 
   return {
@@ -143,10 +194,7 @@ function parseCatalogueEntry(value: unknown): CatalogueEntry {
     relationshipCount: value.relationshipCount as number,
     payloadUrl: value.payloadUrl as string,
     payloadHash,
-    sourceArtifactUrl: value.sourceArtifactUrl as string,
-    sourceArtifactHash,
-    sourceArtifactByteLength: value.sourceArtifactByteLength as number,
-    sourceArtifactMediaType: value.sourceArtifactMediaType,
+    ...sourceArtifact,
     license: optionalString(value.license, 'license'),
     sourceUrl: optionalString(value.sourceUrl, 'sourceUrl'),
     version: optionalString(value.version, 'version'),
@@ -275,7 +323,15 @@ async function fetchCatalogueIndex(
   } catch {
     throw new CatalogueLoadError('Catalogue index is not valid JSON');
   }
-  return parseCatalogue(value);
+  const catalogue = parseCatalogue(value);
+  if (
+    !bypassBrowserCache
+    && catalogue.entries.some((entry) =>
+      !hasCatalogueSourceArtifact(entry))
+  ) {
+    return fetchCatalogueIndex(indexUrl, true);
+  }
+  return catalogue;
 }
 
 function requestCatalogueIndex(
@@ -422,7 +478,7 @@ async function fetchCatalogueEntry(
 }
 
 async function fetchCatalogueSource(
-  entry: CatalogueEntry,
+  entry: CatalogueEntryWithSource,
   indexUrl: string,
 ): Promise<LoadedCatalogueSource> {
   const sourceUrl = new URL(entry.sourceArtifactUrl, indexUrl);
@@ -567,6 +623,11 @@ function requestCatalogueSource(
   entry: CatalogueEntry,
   indexUrl: string,
 ): Promise<LoadedCatalogueSource> {
+  if (!hasCatalogueSourceArtifact(entry)) {
+    return Promise.reject(new CatalogueLoadError(
+      `Catalogue entry "${entry.id}" has no verified original source artifact`,
+    ));
+  }
   const cacheKey = [
     indexUrl,
     entry.id,

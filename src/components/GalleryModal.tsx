@@ -9,6 +9,7 @@ import {
   loadCatalogueEntry,
   loadCatalogueIndex,
   loadCatalogueSource,
+  hasCatalogueSourceArtifact,
 } from '../lib/catalogue';
 import { navigate, parseHash } from '../lib/router';
 import { buildOntologyEmbedSnippet } from '../lib/contentSafety';
@@ -678,20 +679,22 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
                     </div>
 
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                      <button
-                        className="btn btn-secondary"
-                        style={{ padding: '5px 8px', fontSize: 11 }}
-                        title="View the hash-verified original RDF source"
-                        aria-label={`View original RDF source for ${entry.name}`}
-                        disabled={isLoadingSource}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void handleViewOriginalSource(entry);
-                        }}
-                      >
-                        <FileCheck2 size={13} />
-                        {isLoadingSource ? 'Loading…' : 'Original'}
-                      </button>
+                      {hasCatalogueSourceArtifact(entry) && (
+                        <button
+                          className="btn btn-secondary"
+                          style={{ padding: '5px 8px', fontSize: 11 }}
+                          title="View the hash-verified original RDF source"
+                          aria-label={`View original RDF source for ${entry.name}`}
+                          disabled={isLoadingSource}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleViewOriginalSource(entry);
+                          }}
+                        >
+                          <FileCheck2 size={13} />
+                          {isLoadingSource ? 'Loading…' : 'Original'}
+                        </button>
+                      )}
                       <button
                         className="btn btn-secondary"
                         style={{ padding: '5px 8px', fontSize: 11 }}

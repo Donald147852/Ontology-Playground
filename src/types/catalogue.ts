@@ -13,10 +13,10 @@ export interface CatalogueEntry {
   relationshipCount: number;
   payloadUrl: string;
   payloadHash: string;
-  sourceArtifactUrl: string;
-  sourceArtifactHash: string;
-  sourceArtifactByteLength: number;
-  sourceArtifactMediaType: 'application/rdf+xml';
+  sourceArtifactUrl?: string;
+  sourceArtifactHash?: string;
+  sourceArtifactByteLength?: number;
+  sourceArtifactMediaType?: 'application/rdf+xml';
   license?: string;
   sourceUrl?: string;
   version?: string;

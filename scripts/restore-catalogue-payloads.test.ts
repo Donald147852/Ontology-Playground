@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto';
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -84,6 +86,24 @@ describe('published catalogue payload restoration', () => {
       return new Response('not found', { status: 404 });
     });
     const outputDirectory = createOutputDirectory();
+    const cacheOnlyPayload = join(
+      outputDirectory,
+      'catalogue-payloads',
+      'official',
+      'cache-only',
+      `${'a'.repeat(64)}.json`,
+    );
+    const cacheOnlySource = join(
+      outputDirectory,
+      'catalogue-sources',
+      'external',
+      'cache-only',
+      `${'b'.repeat(64)}.rdf`,
+    );
+    mkdirSync(join(cacheOnlyPayload, '..'), { recursive: true });
+    mkdirSync(join(cacheOnlySource, '..'), { recursive: true });
+    writeFileSync(cacheOnlyPayload, 'not published\n');
+    writeFileSync(cacheOnlySource, 'not published\n');
 
     await expect(restoreCataloguePayloads(
       'https://example.com/playground/',
@@ -96,6 +116,8 @@ describe('published catalogue payload restoration', () => {
     expect(readFileSync(
       join(outputDirectory, sourceArtifactUrl),
     ).equals(sourceContent)).toBe(true);
+    expect(existsSync(cacheOnlyPayload)).toBe(false);
+    expect(existsSync(cacheOnlySource)).toBe(false);
     expect(fetchMock).toHaveBeenCalledTimes(4);
 
     await restoreCataloguePayloads(
@@ -220,6 +242,24 @@ describe('published catalogue payload restoration', () => {
   it('starts fresh when the deployed catalogue predates lazy payloads', async () => {
     const fetchMock = vi.fn(async () => jsonResponse([]));
     const outputDirectory = createOutputDirectory();
+    const cacheOnlyPayload = join(
+      outputDirectory,
+      'catalogue-payloads',
+      'official',
+      'cache-only',
+      `${'a'.repeat(64)}.json`,
+    );
+    const cacheOnlySource = join(
+      outputDirectory,
+      'catalogue-sources',
+      'external',
+      'cache-only',
+      `${'b'.repeat(64)}.rdf`,
+    );
+    mkdirSync(join(cacheOnlyPayload, '..'), { recursive: true });
+    mkdirSync(join(cacheOnlySource, '..'), { recursive: true });
+    writeFileSync(cacheOnlyPayload, 'not published\n');
+    writeFileSync(cacheOnlySource, 'not published\n');
 
     await expect(restoreCataloguePayloads(
       'https://example.com/playground/',
@@ -230,6 +270,8 @@ describe('published catalogue payload restoration', () => {
       outputDirectory,
       'catalogue-payloads',
     ))).toBe(false);
+    expect(existsSync(cacheOnlyPayload)).toBe(false);
+    expect(existsSync(cacheOnlySource)).toBe(false);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

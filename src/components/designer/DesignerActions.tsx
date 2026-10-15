@@ -56,7 +56,7 @@ export function DesignerToolbar({
   const handleLoadInPlayground = () => {
     const errors = validate();
     if (errors.length > 0) return;
-    loadOntology(ontology, []);
+    loadOntology(ontology, [], catalogueEntry ?? null);
     navigate({ page: 'home' });
   };
 

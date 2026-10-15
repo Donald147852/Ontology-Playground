@@ -181,6 +181,8 @@ const RDFS_NS = 'http://www.w3.org/2000/01/rdf-schema#';
 const OWL_NS = 'http://www.w3.org/2002/07/owl#';
 const SHACL_NS = 'http://www.w3.org/ns/shacl#';
 const DCTERMS_NS = 'http://purl.org/dc/terms/';
+const PLAYGROUND_METADATA_NS =
+  'https://microsoft.github.io/Ontology-Playground/ns/metadata#';
 
 /**
  * Collect all elements declaring a resource of the given type, supporting both
@@ -478,24 +480,48 @@ export function parseRDF(rdfXml: string): { ontology: Ontology; bindings: DataBi
     const ontEl = ontologyEls[0];
     ontologyName = getChildText(ontEl, 'label', RDFS_NS) || '';
     ontologyDescription = getChildText(ontEl, 'comment', RDFS_NS) || '';
-    const imports = getChildResources(ontEl, 'imports', OWL_NS);
+    const generatedSubset = getDirectChildText(
+      ontEl,
+      'generatedSubset',
+      PLAYGROUND_METADATA_NS,
+    )?.trim() === 'true';
+    const imports = Array.from(new Set([
+      ...getChildResources(ontEl, 'imports', OWL_NS),
+      ...getChildResources(
+        ontEl,
+        'sourceImport',
+        PLAYGROUND_METADATA_NS,
+      ),
+    ]));
     const preservedSourceFeatures: OntologyRdfMetadata['preservedSourceFeatures'] = [];
     if (imports.length > 0) preservedSourceFeatures.push('owlImports');
     if (hasShaclSource) {
       preservedSourceFeatures.push('shacl');
     }
     rdfMetadata = {
-      ontologyIri: getRdfAttribute(ontEl, 'about') || undefined,
-      versionIri: getChildResource(
-        ontEl,
-        'versionIRI',
-        OWL_NS,
-      ) || undefined,
-      versionInfo: getDirectChildText(
-        ontEl,
-        'versionInfo',
-        OWL_NS,
-      ) || undefined,
+      ontologyIri: (
+        generatedSubset
+          ? getChildResource(ontEl, 'source', DCTERMS_NS)
+          : null
+      ) || getRdfAttribute(ontEl, 'about') || undefined,
+      versionIri: (
+        getChildResource(
+          ontEl,
+          'sourceVersionIri',
+          PLAYGROUND_METADATA_NS,
+        )
+        || getChildResource(ontEl, 'versionIRI', OWL_NS)
+        || undefined
+      ),
+      versionInfo: (
+        getDirectChildText(
+          ontEl,
+          'sourceVersionInfo',
+          PLAYGROUND_METADATA_NS,
+        )
+        || getDirectChildText(ontEl, 'versionInfo', OWL_NS)
+        || undefined
+      ),
       license: (
         getChildResource(ontEl, 'license', DCTERMS_NS)
         || getDirectChildText(ontEl, 'license', DCTERMS_NS)
