@@ -20,15 +20,16 @@ import {
   readdirSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import type { Stats } from 'node:fs';
-import { join, basename, dirname, resolve } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { JSDOM } from 'jsdom';
 import { parseRDF } from '../src/lib/rdf/parser.js';
 import { serializeToRDF } from '../src/lib/rdf/serializer.js';
-import { validateOntologyStyle } from './style-validator.js';
+import type { DataBinding, Ontology } from '../src/data/ontology.js';
 import type {
   CatalogueEntry,
   Catalogue,
@@ -36,6 +37,15 @@ import type {
   CataloguePayloadManifest,
   CataloguePayloadManifestEntry,
 } from '../src/types/catalogue.js';
+import {
+  CATALOGUE_TIERS,
+  type CatalogueMetadata,
+  type CatalogueTier,
+  type ValidationReport,
+  validateCatalogueMetadata,
+  validateOntologyForTier,
+  validateRdfSource,
+} from './catalogue-validation.js';
 
 // Provide DOMParser for the RDF parser (browser API not available in Node)
 const dom = new JSDOM('');
@@ -44,25 +54,12 @@ globalThis.DOMParser = dom.window.DOMParser;
 const ROOT = join(import.meta.dirname, '..');
 const CATALOGUE_DIR = join(ROOT, 'catalogue');
 const OUTPUT_PATH = join(ROOT, 'public', 'catalogue.json');
-const CATALOGUE_TIERS = ['official', 'community', 'external'] as const;
 const PAYLOAD_DIR = join(ROOT, 'public', 'catalogue-payloads');
 const PAYLOAD_MANIFEST_FILENAME = 'catalogue-payloads-manifest.json';
 
 // ------------------------------------------------------------------
 // Types
 // ------------------------------------------------------------------
-
-interface CatalogueMetadata {
-  name: string;
-  description: string;
-  icon?: string;
-  category: string;
-  tags?: string[];
-  author?: string;
-  license?: string;
-  sourceUrl?: string;
-  version?: string;
-}
 
 interface CataloguePathIdentity {
   dev: number;
@@ -78,6 +75,25 @@ interface DiscoveredOntologyFiles {
   rdfFiles: string[];
 }
 
+export interface DiscoveredCatalogueSource {
+  tier: CatalogueTier;
+  directory: string;
+  entryId: string;
+  metadataPath: string;
+  rdfPath: string;
+  readMetadata: () => Buffer;
+  readRdf: () => Buffer;
+}
+
+export interface CatalogueSourceDiscovery {
+  sources: DiscoveredCatalogueSource[];
+  errors: string[];
+  findSourceByRdfFile: (
+    path: string,
+  ) => DiscoveredCatalogueSource | undefined;
+  matchesRdfFile: (path: string) => boolean;
+}
+
 export interface CatalogueCompilerDependencies {
   beforeFileOpen?: (path: string) => void;
 }
@@ -90,77 +106,6 @@ interface CompiledPayload {
 interface CompiledCatalogue {
   catalogue: Catalogue;
   payloads: CompiledPayload[];
-}
-
-// ------------------------------------------------------------------
-// Validation helpers
-// ------------------------------------------------------------------
-
-const REQUIRED_METADATA_FIELDS = ['name', 'description', 'category'] as const;
-const VALID_CATEGORIES = ['retail', 'healthcare', 'finance', 'manufacturing', 'education', 'food', 'media', 'events', 'technology', 'general', 'iq-lab', 'school', 'fibo'];
-
-function validateMetadata(
-  meta: unknown,
-  filePath: string,
-  source: CatalogueEntry['source'],
-): CatalogueMetadata {
-  if (typeof meta !== 'object' || meta === null) {
-    throw new Error(`${filePath}: metadata.json must be a JSON object`);
-  }
-  const obj = meta as Record<string, unknown>;
-  for (const field of REQUIRED_METADATA_FIELDS) {
-    if (typeof obj[field] !== 'string' || (obj[field] as string).length === 0) {
-      throw new Error(`${filePath}: metadata.json missing required field "${field}"`);
-    }
-  }
-  if (!VALID_CATEGORIES.includes(obj['category'] as string)) {
-    throw new Error(
-      `${filePath}: invalid category "${obj['category']}". Must be one of: ${VALID_CATEGORIES.join(', ')}`,
-    );
-  }
-  for (const field of ['icon', 'author'] as const) {
-    if (obj[field] !== undefined && typeof obj[field] !== 'string') {
-      throw new Error(`${filePath}: metadata.json field "${field}" must be a string`);
-    }
-  }
-  if (
-    obj['tags'] !== undefined
-    && (!Array.isArray(obj['tags']) || obj['tags'].some((tag) => typeof tag !== 'string'))
-  ) {
-    throw new Error(`${filePath}: metadata.json field "tags" must be an array of strings`);
-  }
-  for (const field of ['license', 'sourceUrl', 'version'] as const) {
-    if (
-      obj[field] !== undefined
-      && (typeof obj[field] !== 'string' || obj[field].trim().length === 0)
-    ) {
-      throw new Error(`${filePath}: metadata.json field "${field}" must be a non-empty string`);
-    }
-  }
-  if (source === 'external') {
-    for (const field of ['license', 'sourceUrl'] as const) {
-      if (typeof obj[field] !== 'string' || obj[field].trim().length === 0) {
-        throw new Error(`${filePath}: external catalogue metadata requires "${field}"`);
-      }
-    }
-  }
-  if (typeof obj['sourceUrl'] === 'string') {
-    try {
-      const sourceUrl = new URL(obj['sourceUrl']);
-      if (
-        sourceUrl.protocol !== 'https:'
-        || sourceUrl.username.length > 0
-        || sourceUrl.password.length > 0
-      ) {
-        throw new Error('unsafe URL');
-      }
-    } catch {
-      throw new Error(
-        `${filePath}: metadata.json field "sourceUrl" must be an HTTPS URL without embedded credentials`,
-      );
-    }
-  }
-  return meta as CatalogueMetadata;
 }
 
 // ------------------------------------------------------------------
@@ -385,7 +330,7 @@ function readRegularCatalogueFile(
   expectedDirectory: CataloguePathIdentity,
   expectedFile: CataloguePathIdentity,
   dependencies: CatalogueCompilerDependencies,
-): string {
+): Buffer {
   dependencies.beforeFileOpen?.(path);
   assertDirectoryIdentity(directory, expectedDirectory);
   assertFileIdentity(path, expectedFile);
@@ -416,7 +361,7 @@ function readRegularCatalogueFile(
     }
     assertFileIdentity(path, expectedFile);
     assertDirectoryIdentity(directory, expectedDirectory);
-    const content = readFileSync(descriptor, 'utf-8');
+    const content = readFileSync(descriptor);
     if (!hasPathIdentity(fstatSync(descriptor), expectedFile)) {
       throw new CatalogueDiscoveryError(
         path,
@@ -429,6 +374,165 @@ function readRegularCatalogueFile(
   }
 }
 
+export function discoverCatalogueSources(
+  catalogueDir: string = CATALOGUE_DIR,
+  dependencies: CatalogueCompilerDependencies = {},
+): CatalogueSourceDiscovery {
+  const sources: DiscoveredCatalogueSource[] = [];
+  const errors: string[] = [];
+  const seenIds = new Set<string>();
+  const rdfFileIdentities: CataloguePathIdentity[] = [];
+  const sourceIdentities: {
+    identity: CataloguePathIdentity;
+    source: DiscoveredCatalogueSource;
+  }[] = [];
+
+  validateCatalogueRoot(catalogueDir);
+
+  for (const tier of CATALOGUE_TIERS) {
+    const tierDir = join(catalogueDir, tier);
+    const ontologyDirs: string[] = [];
+
+    if (tier === 'official') {
+      ontologyDirs.push(...discoverOntologyDirs(tierDir));
+    } else {
+      for (const ownerDir of discoverOntologyDirs(tierDir)) {
+        ontologyDirs.push(...discoverOntologyDirs(ownerDir));
+      }
+    }
+
+    for (const directory of ontologyDirs) {
+      const discoveredFiles = discoverOntologyFiles(directory);
+      for (const rdfFile of discoveredFiles.rdfFiles) {
+        const rdfIdentity = discoveredFiles.fileIdentities.get(
+          join(directory, rdfFile),
+        );
+        if (rdfIdentity) {
+          rdfFileIdentities.push(rdfIdentity);
+        }
+      }
+      if (discoveredFiles.rdfFiles.length !== 1) {
+        errors.push(
+          `${directory}: expected exactly one .rdf or .owl file, found ${discoveredFiles.rdfFiles.length}`,
+        );
+        continue;
+      }
+
+      const metadataPath = join(directory, 'metadata.json');
+      const metadataIdentity = discoveredFiles.fileIdentities.get(metadataPath);
+      if (!metadataIdentity) {
+        errors.push(`${directory}: missing metadata.json`);
+        continue;
+      }
+
+      const rdfPath = join(directory, discoveredFiles.rdfFiles[0]);
+      const rdfIdentity = discoveredFiles.fileIdentities.get(rdfPath);
+      if (!rdfIdentity) {
+        throw new CatalogueDiscoveryError(
+          rdfPath,
+          'filesystem entry changed during catalogue compilation',
+        );
+      }
+
+      const relativePath = directory
+        .slice(tierDir.length + 1)
+        .replace(/\\/g, '/');
+      const entryId = `${tier}/${relativePath}`;
+      if (seenIds.has(entryId)) {
+        errors.push(
+          `${directory}: duplicate catalogue path "${entryId}"`,
+        );
+        continue;
+      }
+      seenIds.add(entryId);
+
+      const source: DiscoveredCatalogueSource = {
+        tier,
+        directory,
+        entryId,
+        metadataPath,
+        rdfPath,
+        readMetadata: () => readRegularCatalogueFile(
+          metadataPath,
+          directory,
+          discoveredFiles.directoryIdentity,
+          metadataIdentity,
+          dependencies,
+        ),
+        readRdf: () => readRegularCatalogueFile(
+          rdfPath,
+          directory,
+          discoveredFiles.directoryIdentity,
+          rdfIdentity,
+          dependencies,
+        ),
+      };
+      sources.push(source);
+      sourceIdentities.push({ identity: rdfIdentity, source });
+    }
+  }
+
+  const identityForPath = (
+    path: string,
+  ): CataloguePathIdentity | undefined => {
+    try {
+      const stat = statSync(path);
+      return stat.isFile() ? toPathIdentity(stat) : undefined;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return undefined;
+      }
+      throw error;
+    }
+  };
+  const hasSamePhysicalIdentity = (
+    actual: CataloguePathIdentity | undefined,
+    expected: CataloguePathIdentity,
+  ): boolean => Boolean(
+    actual
+    && actual.ino !== 0
+    && expected.ino !== 0
+    && actual.dev === expected.dev
+    && actual.ino === expected.ino,
+  );
+
+  return {
+    sources,
+    errors,
+    findSourceByRdfFile: (path) => {
+      const actual = identityForPath(path);
+      return sourceIdentities.find(({ identity }) =>
+        hasSamePhysicalIdentity(actual, identity))?.source;
+    },
+    matchesRdfFile: (path) => {
+      const actual = identityForPath(path);
+      return rdfFileIdentities.some((identity) =>
+        hasSamePhysicalIdentity(actual, identity));
+    },
+  };
+}
+
+function decodeUtf8(bytes: Uint8Array, path: string): string {
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    throw new Error(`${path}: file must be valid UTF-8`);
+  }
+}
+
+function printValidationReport(
+  path: string,
+  report: ValidationReport,
+): number {
+  for (const warning of report.warnings) {
+    console.warn(`⚠ ${path}: ${warning.message}`);
+  }
+  for (const error of report.errors) {
+    console.error(`✘ ${path}: ${error.message}`);
+  }
+  return report.errors.length;
+}
+
 // ------------------------------------------------------------------
 // Main
 // ------------------------------------------------------------------
@@ -439,169 +543,108 @@ function compileCatalogueArtifacts(
 ): CompiledCatalogue {
   const entries: CatalogueEntry[] = [];
   const payloads: CompiledPayload[] = [];
-  const seenIds = new Set<string>();
   let errors = 0;
 
-  validateCatalogueRoot(catalogueDir);
+  const discovery = discoverCatalogueSources(catalogueDir, dependencies);
+  for (const discoveryError of discovery.errors) {
+    console.error(`✘ ${discoveryError}`);
+    errors++;
+  }
 
-  for (const tier of CATALOGUE_TIERS) {
-    const tierDir = join(catalogueDir, tier);
-    // For community and external, ontologies are nested one level deeper:
-    // community/<user>/<slug>/  or  external/<source-name>/<slug>/
-    const ontologyDirs: { dir: string; source: typeof tier }[] = [];
+  for (const source of discovery.sources) {
+    let metadata: CatalogueMetadata;
+    let ontology: Ontology;
+    let bindings: DataBinding[];
 
-    if (tier === 'official') {
-      for (const dir of discoverOntologyDirs(tierDir)) {
-        ontologyDirs.push({ dir, source: tier });
-      }
-    } else {
-      // community/<username>/<ontology-slug>/  or  external/<source>/<ontology-slug>/
-      for (const userDir of discoverOntologyDirs(tierDir)) {
-        for (const dir of discoverOntologyDirs(userDir)) {
-          ontologyDirs.push({ dir, source: tier });
-        }
-      }
-    }
-
-    for (const { dir, source } of ontologyDirs) {
-      const slug = basename(dir);
-      const metadataPath = join(dir, 'metadata.json');
-      const discoveredFiles = discoverOntologyFiles(dir);
-      const { rdfFiles } = discoveredFiles;
-
-      if (rdfFiles.length === 0) {
-        console.error(`✘ ${dir}: no .rdf or .owl file found`);
-        errors++;
+    try {
+      const rawMetadata = JSON.parse(decodeUtf8(
+        source.readMetadata(),
+        source.metadataPath,
+      )) as unknown;
+      const metadataReport = validateCatalogueMetadata(
+        rawMetadata,
+        source.tier,
+      );
+      errors += printValidationReport(
+        source.metadataPath,
+        metadataReport,
+      );
+      if (metadataReport.errors.length > 0) {
         continue;
       }
-      const metadataIdentity = discoveredFiles.fileIdentities.get(metadataPath);
-      if (!metadataIdentity) {
-        console.error(`✘ ${dir}: missing metadata.json`);
-        errors++;
+      metadata = rawMetadata as CatalogueMetadata;
+
+      const sourceReport = validateRdfSource(source.readRdf());
+      errors += printValidationReport(source.rdfPath, sourceReport);
+      if (sourceReport.errors.length > 0 || sourceReport.text === undefined) {
         continue;
       }
 
-      // Parse metadata
-      let metadata: CatalogueMetadata;
-      try {
-        const raw = JSON.parse(readRegularCatalogueFile(
-          metadataPath,
-          dir,
-          discoveredFiles.directoryIdentity,
-          metadataIdentity,
-          dependencies,
-        ));
-        metadata = validateMetadata(raw, metadataPath, source);
-      } catch (e) {
-        if (e instanceof CatalogueDiscoveryError) throw e;
-        console.error(`✘ ${metadataPath}: ${(e as Error).message}`);
-        errors++;
-        continue;
-      }
+      const parsed = parseRDF(sourceReport.text);
+      ontology = parsed.ontology;
+      bindings = parsed.bindings;
 
-      // Derive a stable ID from the filesystem path: <source>/<slug>
-      // For community ontologies the path is deeper: community/<user>/<slug>
-      const relPath = dir.slice(tierDir.length + 1).replace(/\\/g, '/'); // e.g. "cosmic-coffee" or "alice/my-ontology"
-      const entryId = `${source}/${relPath}`;
-
-      if (seenIds.has(entryId)) {
-        console.error(`✘ ${dir}: duplicate catalogue path "${entryId}"`);
-        errors++;
-        continue;
-      }
-
-      // Parse RDF
-      const rdfPath = join(dir, rdfFiles[0]);
-      const rdfIdentity = discoveredFiles.fileIdentities.get(rdfPath);
-      if (!rdfIdentity) {
-        throw new CatalogueDiscoveryError(
-          rdfPath,
-          'filesystem entry changed during catalogue compilation',
-        );
-      }
-      let ontology: Ontology;
-      let bindings: DataBinding[];
-      try {
-        const rdfXml = readRegularCatalogueFile(
-          rdfPath,
-          dir,
-          discoveredFiles.directoryIdentity,
-          rdfIdentity,
-          dependencies,
-        );
-        const parsed = parseRDF(rdfXml);
-        ontology = parsed.ontology;
-        bindings = parsed.bindings;
-      } catch (e) {
-        if (e instanceof CatalogueDiscoveryError) throw e;
-        console.error(`✘ ${rdfPath}: ${(e as Error).message}`);
-        errors++;
-        continue;
-      }
-
-      // Round-trip check: serialize back and re-parse to verify fidelity
-      try {
-        const reserialized = serializeToRDF(ontology, bindings);
-        parseRDF(reserialized);
-      } catch (e) {
-        console.error(`✘ ${rdfPath}: round-trip verification failed — ${(e as Error).message}`);
-        errors++;
-        continue;
-      }
-
-      // Style validation: check naming conventions and spelling
-      const styleErrors = validateOntologyStyle(ontology);
-      if (styleErrors.length > 0) {
-        for (const styleError of styleErrors) {
-          if (styleError.severity === 'error') {
-            console.error(`✘ ${rdfPath}: ${styleError.message} (in "${styleError.label}")`);
-            errors++;
-          } else {
-            console.warn(`⚠ ${rdfPath}: ${styleError.message} (in "${styleError.label}")`);
-          }
-        }
-        if (styleErrors.some(e => e.severity === 'error')) {
-          continue;
-        }
-      }
-
-      const payload: CatalogueEntryPayload = {
-        schemaVersion: 1,
-        id: entryId,
+      const ontologyReport = validateOntologyForTier(
         ontology,
-        bindings,
-      };
-      const payloadContent = JSON.stringify(payload, null, 2) + '\n';
-      const payloadHash = createHash('sha256')
-        .update(payloadContent)
-        .digest('hex');
-      const relativePayloadPath = `${entryId}/${payloadHash}.json`;
-
-      seenIds.add(entryId);
-      entries.push({
-        id: entryId,
-        name: metadata.name,
-        description: metadata.description,
-        icon: metadata.icon,
-        category: metadata.category,
-        tags: metadata.tags ?? [],
-        author: metadata.author ?? 'unknown',
-        source,
-        entityCount: ontology.entityTypes.length,
-        relationshipCount: ontology.relationships.length,
-        payloadUrl: `catalogue-payloads/${relativePayloadPath}`,
-        payloadHash: `sha256:${payloadHash}`,
-        license: metadata.license,
-        sourceUrl: metadata.sourceUrl,
-        version: metadata.version,
-      });
-      payloads.push({
-        relativePath: relativePayloadPath,
-        content: payloadContent,
-      });
-
-      console.log(`✔ ${source}/${slug}`);
+        source.tier,
+      );
+      errors += printValidationReport(source.rdfPath, ontologyReport);
+      if (ontologyReport.errors.length > 0) {
+        continue;
+      }
+    } catch (error) {
+      if (error instanceof CatalogueDiscoveryError) throw error;
+      console.error(`✘ ${source.directory}: ${(error as Error).message}`);
+      errors++;
+      continue;
     }
+
+    try {
+      const reserialized = serializeToRDF(ontology, bindings);
+      parseRDF(reserialized);
+    } catch (error) {
+      console.error(
+        `✘ ${source.rdfPath}: round-trip verification failed — ${(error as Error).message}`,
+      );
+      errors++;
+      continue;
+    }
+
+    const payload: CatalogueEntryPayload = {
+      schemaVersion: 1,
+      id: source.entryId,
+      ontology,
+      bindings,
+    };
+    const payloadContent = JSON.stringify(payload, null, 2) + '\n';
+    const payloadHash = createHash('sha256')
+      .update(payloadContent)
+      .digest('hex');
+    const relativePayloadPath = `${source.entryId}/${payloadHash}.json`;
+
+    entries.push({
+      id: source.entryId,
+      name: metadata.name,
+      description: metadata.description,
+      icon: metadata.icon,
+      category: metadata.category,
+      tags: metadata.tags ?? [],
+      author: metadata.author ?? 'unknown',
+      source: source.tier,
+      entityCount: ontology.entityTypes.length,
+      relationshipCount: ontology.relationships.length,
+      payloadUrl: `catalogue-payloads/${relativePayloadPath}`,
+      payloadHash: `sha256:${payloadHash}`,
+      license: metadata.license,
+      sourceUrl: metadata.sourceUrl,
+      version: metadata.version,
+    });
+    payloads.push({
+      relativePath: relativePayloadPath,
+      content: payloadContent,
+    });
+
+    console.log(`✔ ${source.entryId}`);
   }
 
   if (errors > 0) {

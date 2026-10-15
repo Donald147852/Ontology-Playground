@@ -46,14 +46,18 @@ function getChildText(
 function getChildResource(
   parent: Element,
   localName: string,
+  namespace?: string,
 ): string | null {
   for (let i = 0; i < parent.children.length; i++) {
     const child = parent.children[i];
     const childLocal = child.localName || child.tagName.split(':').pop();
-    if (childLocal === localName) {
-      return (
-        child.getAttribute('rdf:resource') ||
-        child.getAttributeNS('http://www.w3.org/1999/02/22-rdf-syntax-ns#', 'resource')
+    if (
+      childLocal === localName
+      && (namespace === undefined || child.namespaceURI === namespace)
+    ) {
+      return child.getAttributeNS(
+        'http://www.w3.org/1999/02/22-rdf-syntax-ns#',
+        'resource',
       );
     }
   }
@@ -75,9 +79,7 @@ function getChildResources(
     const child = parent.children[i];
     const childLocal = child.localName || child.tagName.split(':').pop();
     if (childLocal !== localName || (namespace && child.namespaceURI !== namespace)) continue;
-    const resource =
-      child.getAttribute('rdf:resource') ||
-      child.getAttributeNS(RDF_NS, 'resource');
+    const resource = child.getAttributeNS(RDF_NS, 'resource');
     if (resource) results.push(resource);
   }
   return results;
@@ -191,8 +193,7 @@ function indexRdfNodes(root: Element): RdfNodeIndex {
     for (let j = 0; j < element.children.length; j++) {
       const child = element.children[j];
       if (child.namespaceURI !== RDF_NS || child.localName !== 'type') continue;
-      const resource =
-        child.getAttribute('rdf:resource') || child.getAttributeNS(RDF_NS, 'resource');
+      const resource = child.getAttributeNS(RDF_NS, 'resource');
       if (!resource || indexedTypes.has(resource)) continue;
       indexedTypes.add(resource);
       const elements = descriptionsByType.get(resource) ?? [];
@@ -223,10 +224,7 @@ function getTypedElements(
 }
 
 function getRdfAttribute(element: Element, localName: string): string | null {
-  return (
-    element.getAttribute(`rdf:${localName}`)
-    || element.getAttributeNS(RDF_NS, localName)
-  );
+  return element.getAttributeNS(RDF_NS, localName);
 }
 
 function getDirectChild(parent: Element, localName: string): Element | null {
@@ -547,7 +545,7 @@ export function parseRDF(rdfXml: string): { ontology: Ontology; bindings: DataBi
     const comments = getChildTexts(el, 'comment');
     const hasIdentifierComment = comments.some(c => /^identifier\s+property$/i.test(c.trim()));
     const descriptionComment = comments.find(c => !/^identifier\s+property$/i.test(c.trim())) ?? null;
-    const domainUri = getChildResource(el, 'domain');
+    const domainUri = getChildResource(el, 'domain', RDFS_NS);
     const legacyEnumValues = getChildText(el, 'enumValues');
     const shapeMetadata = shaclPathMetadata.get(about);
 
@@ -555,7 +553,7 @@ export function parseRDF(rdfXml: string): { ontology: Ontology; bindings: DataBi
       about,
       label: getChildText(el, 'label', RDFS_NS) || localNameFromUri(about),
       domainUri,
-      rangeUri: getChildResource(el, 'range'),
+      rangeUri: getChildResource(el, 'range', RDFS_NS),
       comment: descriptionComment,
       isIdentifier: (
         getChildText(el, 'isIdentifier') === 'true'
@@ -664,14 +662,14 @@ export function parseRDF(rdfXml: string): { ontology: Ontology; bindings: DataBi
     let toId = uncapitalize(getChildText(el, 'toEntityId') || '');
 
     if (!fromId) {
-      const domainUri = getChildResource(el, 'domain');
+      const domainUri = getChildResource(el, 'domain', RDFS_NS);
       if (domainUri) {
         fromId = entityMap.get(domainUri)?.id
           ?? uncapitalize(localNameFromUri(domainUri));
       }
     }
     if (!toId) {
-      const rangeUri = getChildResource(el, 'range');
+      const rangeUri = getChildResource(el, 'range', RDFS_NS);
       if (rangeUri) {
         toId = entityMap.get(rangeUri)?.id
           ?? uncapitalize(localNameFromUri(rangeUri));
@@ -729,7 +727,7 @@ export function parseRDF(rdfXml: string): { ontology: Ontology; bindings: DataBi
 
   for (let i = 0; i < classEls.length; i++) {
     const el = classEls[i];
-    const about = el.getAttribute('rdf:about') || el.getAttributeNS(RDF_NS, 'about') || '';
+    const about = getRdfAttribute(el, 'about') || '';
     if (!about) continue;
 
     const subEntity = entityMap.get(about);
