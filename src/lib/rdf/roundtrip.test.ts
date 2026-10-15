@@ -180,6 +180,63 @@ describe('RDF round-trip tests', () => {
     expectOntologiesEqual(parsed, ontology);
   });
 
+  it('round-trips ontology metadata with mixed subclass and object-property semantics', () => {
+    const ontology: Ontology = {
+      name: 'Semantic Fidelity',
+      description: 'Preserves RDF metadata and relationship kinds',
+      entityTypes: [
+        { id: 'parent', name: 'Parent', description: '', icon: '📦', color: '#111', properties: [] },
+        { id: 'child', name: 'Child', description: '', icon: '📦', color: '#222', properties: [] },
+      ],
+      relationships: [
+        {
+          id: 'child-related-parent',
+          name: 'related',
+          from: 'child',
+          to: 'parent',
+          cardinality: 'many-to-many',
+        },
+        {
+          id: 'child-subClassOf-parent',
+          name: 'subClassOf',
+          from: 'child',
+          to: 'parent',
+          cardinality: 'many-to-one',
+          kind: 'subclass',
+        },
+      ],
+      rdfMetadata: {
+        ontologyIri: 'https://example.org/semantic-fidelity',
+        versionIri: 'https://example.org/semantic-fidelity/1.0',
+        versionInfo: '1.0',
+        license: 'https://example.org/license',
+        imports: ['https://example.org/imported'],
+        preservedSourceFeatures: ['owlImports', 'shacl'],
+      },
+    };
+
+    const rdf = serializeToRDF(ontology);
+    expect(rdf).toContain(
+      '<owl:Ontology rdf:about="https://example.org/semantic-fidelity">',
+    );
+    expect(rdf).toContain(
+      '<rdfs:subClassOf rdf:resource="http://example.org/ontology/semantic-fidelity/Parent"/>',
+    );
+    expect(rdf).toContain(
+      '<owl:ObjectProperty rdf:about="http://example.org/ontology/semantic-fidelity/child-related-parent">',
+    );
+    expect(rdf).toContain(
+      '<owl:imports rdf:resource="https://example.org/imported"/>',
+    );
+
+    const { ontology: parsed } = parseRDF(rdf);
+    expectOntologiesEqual(parsed, ontology);
+    expect(parsed.rdfMetadata).toEqual({
+      ...ontology.rdfMetadata,
+      preservedSourceFeatures: ['owlImports'],
+    });
+  });
+
   it('round-trips an empty ontology', () => {
     const ontology: Ontology = {
       name: 'Empty',

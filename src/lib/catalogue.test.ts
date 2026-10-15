@@ -6,6 +6,7 @@ import {
   clearCatalogueCache,
   loadCatalogueEntry,
   loadCatalogueIndex,
+  loadCatalogueSource,
 } from './catalogue';
 
 const payload: CatalogueEntryPayload = {
@@ -28,6 +29,9 @@ function payloadHash(content: string): string {
   return `sha256:${createHash('sha256').update(content).digest('hex')}`;
 }
 
+const sourceContent = '<?xml version="1.0"?><rdf:RDF/>\n';
+const sourceHash = payloadHash(sourceContent);
+
 function createCatalogue(content = payloadContent()): Catalogue {
   const hash = payloadHash(content);
   return {
@@ -47,6 +51,14 @@ function createCatalogue(content = payloadContent()): Catalogue {
       payloadUrl:
         `catalogue-payloads/official/test/${hash.slice('sha256:'.length)}.json`,
       payloadHash: hash,
+      sourceArtifactUrl:
+        `catalogue-sources/official/test/${
+          sourceHash.slice('sha256:'.length)
+        }.rdf`,
+      sourceArtifactHash: sourceHash,
+      sourceArtifactByteLength: new TextEncoder().encode(sourceContent).byteLength,
+      sourceArtifactMediaType: 'application/rdf+xml',
+      sourceUrl: 'https://upstream.example/ontology',
     }],
   };
 }
@@ -109,6 +121,118 @@ describe('catalogue loader', () => {
     expect(fetchMock.mock.calls[1][0].toString()).toContain(
       '/catalogue-payloads/official/test/',
     );
+  });
+
+  it('loads and verifies the exact same-origin source artifact', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async (input) => input.toString().endsWith('/catalogue.json')
+        ? response(JSON.stringify(createCatalogue()))
+        : new Response(sourceContent, {
+            status: 200,
+            headers: { 'Content-Type': 'application/rdf+xml' },
+          }),
+    );
+
+    const loaded = await loadCatalogueSource(
+      'official/test',
+      '/playground/',
+    );
+
+    expect(loaded.text).toBe(sourceContent);
+    expect(Array.from(loaded.bytes)).toEqual(
+      Array.from(new TextEncoder().encode(sourceContent)),
+    );
+    expect(loaded.hash).toBe(sourceHash);
+    expect(loaded.sourceArtifactUrl).toBe(
+      createCatalogue().entries[0].sourceArtifactUrl,
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][0].toString()).toContain(
+      '/catalogue-sources/official/test/',
+    );
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({
+      redirect: 'error',
+    });
+    expect(fetchMock.mock.calls.some(
+      ([input]) => input.toString().startsWith('https://upstream.example/'),
+    )).toBe(false);
+  });
+
+  it('returns refreshed source metadata after a stale source URL', async () => {
+    const refreshedSource =
+      '<?xml version="1.0"?><rdf:RDF data-version="2"/>\n';
+    const refreshedHash = payloadHash(refreshedSource);
+    const originalCatalogue = createCatalogue();
+    const refreshedCatalogue: Catalogue = {
+      ...originalCatalogue,
+      entries: [{
+        ...originalCatalogue.entries[0],
+        sourceArtifactUrl:
+          `catalogue-sources/official/test/${
+            refreshedHash.slice('sha256:'.length)
+          }.rdf`,
+        sourceArtifactHash: refreshedHash,
+        sourceArtifactByteLength: new TextEncoder()
+          .encode(refreshedSource).byteLength,
+      }],
+    };
+    let indexRequests = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = input.toString();
+      if (url.endsWith('/catalogue.json')) {
+        indexRequests++;
+        return response(JSON.stringify(
+          indexRequests === 1
+            ? originalCatalogue
+            : refreshedCatalogue,
+        ));
+      }
+      if (url.endsWith(originalCatalogue.entries[0].sourceArtifactUrl)) {
+        return new Response('not found', { status: 404 });
+      }
+      return new Response(refreshedSource, { status: 200 });
+    });
+
+    const loaded = await loadCatalogueSource(
+      'official/test',
+      '/playground/',
+    );
+
+    expect(loaded.text).toBe(refreshedSource);
+    expect(loaded.hash).toBe(refreshedHash);
+    expect(loaded.sourceArtifactUrl).toBe(
+      refreshedCatalogue.entries[0].sourceArtifactUrl,
+    );
+    expect(indexRequests).toBe(2);
+  });
+
+  it('rejects source integrity failures and allows a later retry', async () => {
+    let sourceRequests = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      if (input.toString().endsWith('/catalogue.json')) {
+        return response(JSON.stringify(createCatalogue()));
+      }
+      sourceRequests++;
+      return new Response(
+        sourceRequests === 1 ? 'corrupt source' : sourceContent,
+        { status: 200 },
+      );
+    });
+
+    await expect(loadCatalogueSource(
+      'official/test',
+      '/playground/',
+    )).rejects.toThrow(
+      'Original source size check failed for "official/test"',
+    );
+    await expect(loadCatalogueSource(
+      'official/test',
+      '/playground/',
+    )).resolves.toMatchObject({
+      text: sourceContent,
+      hash: sourceHash,
+    });
+    expect(sourceRequests).toBe(2);
   });
 
   it('deduplicates concurrent requests and caches successful entries', async () => {
@@ -228,6 +352,10 @@ describe('catalogue loader', () => {
       payloadUrl:
         `catalogue-payloads/official/added/${addedHash.slice('sha256:'.length)}.json`,
       payloadHash: addedHash,
+      sourceArtifactUrl:
+        `catalogue-sources/official/added/${
+          sourceHash.slice('sha256:'.length)
+        }.rdf`,
     });
     updatedCatalogue.count = updatedCatalogue.entries.length;
     let indexRequests = 0;

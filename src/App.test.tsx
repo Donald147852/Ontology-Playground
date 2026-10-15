@@ -58,6 +58,11 @@ const linkedEntry: LoadedCatalogueEntry = {
   relationshipCount: 0,
   payloadUrl: 'catalogue-payloads/official/deep-link-test/hash.json',
   payloadHash: `sha256:${'a'.repeat(64)}`,
+  sourceArtifactUrl:
+    `catalogue-sources/official/deep-link-test/${'b'.repeat(64)}.rdf`,
+  sourceArtifactHash: `sha256:${'b'.repeat(64)}`,
+  sourceArtifactByteLength: 42,
+  sourceArtifactMediaType: 'application/rdf+xml',
   ontology: {
     name: 'Deep Link Test',
     namespace: 'https://example.com/deep-link-test#',
@@ -100,6 +105,8 @@ describe('catalogue deep links', () => {
     expect(loadOntology).toHaveBeenCalledWith(
       linkedEntry.ontology,
       linkedEntry.bindings,
+      linkedEntry,
     );
+    expect(useAppStore.getState().currentCatalogueEntry).toBe(linkedEntry);
   });
 });

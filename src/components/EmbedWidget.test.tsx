@@ -38,6 +38,10 @@ const fakePayloadContent = JSON.stringify(fakePayload, null, 2) + '\n';
 const fakePayloadHash = createHash('sha256')
   .update(fakePayloadContent)
   .digest('hex');
+const fakeSource = '<?xml version="1.0"?><rdf:RDF />\n';
+const fakeSourceHash = createHash('sha256')
+  .update(fakeSource)
+  .digest('hex');
 
 const fakeCatalogue: Catalogue = {
   schemaVersion: 2,
@@ -56,6 +60,12 @@ const fakeCatalogue: Catalogue = {
     relationshipCount: 1,
     payloadUrl: `catalogue-payloads/official/test/${fakePayloadHash}.json`,
     payloadHash: `sha256:${fakePayloadHash}`,
+    sourceArtifactUrl:
+      `catalogue-sources/official/test/${fakeSourceHash}.rdf`,
+    sourceArtifactHash: `sha256:${fakeSourceHash}`,
+    sourceArtifactByteLength: new TextEncoder()
+      .encode(fakeSource).byteLength,
+    sourceArtifactMediaType: 'application/rdf+xml',
   }],
 };
 
@@ -141,13 +151,13 @@ function createWideOntology(): Ontology {
   };
 }
 
-function mockCatalogueFetch() {
+function mockCatalogueFetch(catalogue: Catalogue = fakeCatalogue) {
   return vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
     const url = input.toString();
     if (url.endsWith('/catalogue.json')) {
-      return new Response(JSON.stringify(fakeCatalogue), { status: 200 });
+      return new Response(JSON.stringify(catalogue), { status: 200 });
     }
-    if (url.endsWith(fakeCatalogue.entries[0].payloadUrl)) {
+    if (url.endsWith(catalogue.entries[0].payloadUrl)) {
       return new Response(fakePayloadContent, { status: 200 });
     }
     return new Response('not found', { status: 404 });
@@ -297,7 +307,7 @@ describe('EmbedWidget', () => {
     expect(fetchMock.mock.calls[1][1]).toMatchObject({ cache: 'no-store' });
   });
 
-  it('switches between Graph and RDF Source tabs', async () => {
+  it('switches between Graph and generated RDF tabs', async () => {
     const inline = btoa(JSON.stringify(testOntology));
     const config: EmbedConfig = { ontologyInline: inline, theme: 'dark', height: '400px' };
     const user = userEvent.setup();
@@ -309,10 +319,10 @@ describe('EmbedWidget', () => {
 
     // Initially on Graph tab — no RDF source visible
     expect(screen.getByText('Graph')).toBeTruthy();
-    expect(screen.getByText('RDF Source')).toBeTruthy();
+    expect(screen.getByText('Generated RDF')).toBeTruthy();
 
     // Switch to RDF tab
-    await user.click(screen.getByText('RDF Source'));
+    await user.click(screen.getByText('Generated RDF'));
 
     // Should show RDF serialization (text is split across syntax-highlighted spans)
     await waitFor(() => {
@@ -320,8 +330,33 @@ describe('EmbedWidget', () => {
       expect(pre?.textContent).toMatch(/owl:Ontology/);
     });
 
-    // Copy RDF button should appear
-    expect(screen.getByText('Copy RDF')).toBeTruthy();
+    // Copy generated RDF button should appear
+    expect(screen.getByText('Copy generated RDF')).toBeTruthy();
+  });
+
+  it('discloses generated RDF subsets for external catalogue entries', async () => {
+    const externalCatalogue: Catalogue = {
+      ...fakeCatalogue,
+      entries: [{
+        ...fakeCatalogue.entries[0],
+        source: 'external',
+      }],
+    };
+    mockCatalogueFetch(externalCatalogue);
+    const user = userEvent.setup();
+    render(<EmbedWidget config={{
+      catalogueId: 'official/test',
+      theme: 'dark',
+      height: '400px',
+    }} />);
+
+    await screen.findByText('Test Ontology');
+    await user.click(screen.getByText('Generated RDF subset'));
+
+    expect(screen.getByRole('note').textContent).toContain(
+      'Source-only SHACL rules and unsupported triples',
+    );
+    expect(screen.getByText('Copy generated RDF')).toBeTruthy();
   });
 
   it('renders with light theme', async () => {

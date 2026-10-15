@@ -96,10 +96,29 @@ function serializeOntologyDeclaration(
   ontology: Ontology,
   baseUri: string,
 ): string {
-  let rdf = `    <owl:Ontology rdf:about="${escapeXml(baseUri)}">\n`;
+  const metadata = ontology.rdfMetadata;
+  const ontologyIri = metadata?.ontologyIri || baseUri;
+  let rdf = `    <owl:Ontology rdf:about="${escapeXml(ontologyIri)}">\n`;
   rdf += `        <rdfs:label>${escapeXml(ontology.name)}</rdfs:label>\n`;
   if (ontology.description) {
     rdf += `        <rdfs:comment>${escapeXml(ontology.description)}</rdfs:comment>\n`;
+  }
+  if (metadata?.versionIri) {
+    rdf += `        <owl:versionIRI rdf:resource="${escapeXml(metadata.versionIri)}"/>\n`;
+  }
+  if (metadata?.versionInfo) {
+    rdf += `        <owl:versionInfo>${escapeXml(metadata.versionInfo)}</owl:versionInfo>\n`;
+  }
+  if (metadata?.license) {
+    const license = escapeXml(metadata.license);
+    if (/^[a-z][a-z0-9+.-]*:/i.test(metadata.license)) {
+      rdf += `        <dcterms:license rdf:resource="${license}"/>\n`;
+    } else {
+      rdf += `        <dcterms:license>${license}</dcterms:license>\n`;
+    }
+  }
+  for (const importedIri of metadata?.imports ?? []) {
+    rdf += `        <owl:imports rdf:resource="${escapeXml(importedIri)}"/>\n`;
   }
   rdf += '    </owl:Ontology>\n\n';
   return rdf;

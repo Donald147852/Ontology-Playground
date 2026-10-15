@@ -5,6 +5,7 @@ import type {
   Relationship,
   RelationshipAttribute,
   DataBinding,
+  OntologyRdfMetadata,
 } from '../../data/ontology';
 
 export class RDFParseError extends Error {
@@ -59,6 +60,23 @@ function getChildResource(
         'http://www.w3.org/1999/02/22-rdf-syntax-ns#',
         'resource',
       );
+    }
+  }
+  return null;
+}
+
+function getDirectChildText(
+  parent: Element,
+  localName: string,
+  namespace: string,
+): string | null {
+  for (let i = 0; i < parent.children.length; i++) {
+    const child = parent.children[i];
+    if (
+      child.localName === localName
+      && child.namespaceURI === namespace
+    ) {
+      return child.textContent;
     }
   }
   return null;
@@ -162,6 +180,7 @@ const RDF_NS = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#';
 const RDFS_NS = 'http://www.w3.org/2000/01/rdf-schema#';
 const OWL_NS = 'http://www.w3.org/2002/07/owl#';
 const SHACL_NS = 'http://www.w3.org/ns/shacl#';
+const DCTERMS_NS = 'http://purl.org/dc/terms/';
 
 /**
  * Collect all elements declaring a resource of the given type, supporting both
@@ -450,12 +469,46 @@ export function parseRDF(rdfXml: string): { ontology: Ontology; bindings: DataBi
   // --- Extract ontology metadata ---
   let ontologyName = '';
   let ontologyDescription = '';
+  let rdfMetadata: OntologyRdfMetadata | undefined;
+  const hasShaclSource =
+    root.getElementsByTagNameNS(SHACL_NS, '*').length > 0;
 
   const ontologyEls = getTypedElements(root, OWL_NS, 'Ontology', descriptionTypeIndex);
   if (ontologyEls.length > 0) {
     const ontEl = ontologyEls[0];
     ontologyName = getChildText(ontEl, 'label', RDFS_NS) || '';
     ontologyDescription = getChildText(ontEl, 'comment', RDFS_NS) || '';
+    const imports = getChildResources(ontEl, 'imports', OWL_NS);
+    const preservedSourceFeatures: OntologyRdfMetadata['preservedSourceFeatures'] = [];
+    if (imports.length > 0) preservedSourceFeatures.push('owlImports');
+    if (hasShaclSource) {
+      preservedSourceFeatures.push('shacl');
+    }
+    rdfMetadata = {
+      ontologyIri: getRdfAttribute(ontEl, 'about') || undefined,
+      versionIri: getChildResource(
+        ontEl,
+        'versionIRI',
+        OWL_NS,
+      ) || undefined,
+      versionInfo: getDirectChildText(
+        ontEl,
+        'versionInfo',
+        OWL_NS,
+      ) || undefined,
+      license: (
+        getChildResource(ontEl, 'license', DCTERMS_NS)
+        || getDirectChildText(ontEl, 'license', DCTERMS_NS)
+        || undefined
+      ),
+      imports,
+      preservedSourceFeatures,
+    };
+  } else if (hasShaclSource) {
+    rdfMetadata = {
+      imports: [],
+      preservedSourceFeatures: ['shacl'],
+    };
   }
 
   // --- Extract OWL Classes → EntityTypes ---
@@ -796,6 +849,7 @@ export function parseRDF(rdfXml: string): { ontology: Ontology; bindings: DataBi
     entityTypes,
     relationships,
   };
+  if (rdfMetadata) ontology.rdfMetadata = rdfMetadata;
 
   return { ontology, bindings };
 }

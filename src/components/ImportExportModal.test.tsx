@@ -5,6 +5,7 @@ import { ImportExportModal } from './ImportExportModal';
 import { useAppStore } from '../store/appStore';
 import { serializeToRDF } from '../lib/rdf/serializer';
 import type { Ontology } from '../data/ontology';
+import type { CatalogueEntry } from '../types/catalogue';
 
 // Mock framer-motion to avoid animation issues in tests
 vi.mock('framer-motion', () => ({
@@ -61,6 +62,25 @@ const testOntology: Ontology = {
   ],
 };
 
+const externalCatalogueEntry: CatalogueEntry = {
+  id: 'external/test-widgets',
+  name: 'External Test Widgets',
+  description: 'External ontology fixture',
+  category: 'general',
+  tags: [],
+  author: 'Test',
+  source: 'external',
+  entityCount: 2,
+  relationshipCount: 1,
+  payloadUrl: `catalogue-payloads/external/test-widgets/${'a'.repeat(64)}.json`,
+  payloadHash: `sha256:${'a'.repeat(64)}`,
+  sourceArtifactUrl:
+    `catalogue-sources/external/test-widgets/${'b'.repeat(64)}.rdf`,
+  sourceArtifactHash: `sha256:${'b'.repeat(64)}`,
+  sourceArtifactByteLength: 42,
+  sourceArtifactMediaType: 'application/rdf+xml',
+};
+
 function createRdfFile(rdfContent: string, fileName = 'test-ontology.rdf'): File {
   return new File([rdfContent], fileName, { type: 'application/rdf+xml' });
 }
@@ -91,6 +111,23 @@ describe('ImportExportModal integration', () => {
 
     expect(playgroundProfile.getAttribute('aria-pressed')).toBe('false');
     expect(standardsProfile.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('warns when exporting an editable subset of an external ontology', () => {
+    useAppStore.getState().loadOntology(
+      testOntology,
+      [],
+      externalCatalogueEntry,
+    );
+
+    render(<ImportExportModal onClose={onClose} />);
+
+    expect(screen.getByRole('note').textContent).toContain(
+      'does not reproduce source-only SHACL rules or unsupported triples',
+    );
+    expect(screen.getByRole('note').textContent).toContain(
+      'Download the verified original from the catalogue',
+    );
   });
 
   it('imports a valid RDF file and updates the store', async () => {

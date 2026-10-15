@@ -2622,6 +2622,14 @@ body {
   background: rgba(216, 59, 1, 0.08);
   border-bottom: 1px solid var(--border-color);
 }
+.designer-source-fidelity-warning {
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  background: rgba(255, 185, 0, 0.10);
+  border-bottom: 1px solid rgba(255, 185, 0, 0.35);
+}
 .designer-add-btn.small.secondary {
   background: var(--bg-tertiary, #e0e0e0);
   color: var(--text-primary);

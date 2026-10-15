@@ -34,6 +34,7 @@ jobs:
         with:
           path: |
             public/catalogue-payloads
+            public/catalogue-sources
             public/catalogue-payloads-manifest.json
           key: catalogue-payloads-${{ github.run_id }}
           restore-keys: |
@@ -64,6 +65,7 @@ jobs:
         with:
           path: |
             public/catalogue-payloads
+            public/catalogue-sources
             public/catalogue-payloads-manifest.json
           key: catalogue-payloads-${{ github.run_id }}
 

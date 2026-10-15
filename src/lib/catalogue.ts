@@ -4,6 +4,7 @@ import type {
   CatalogueEntry,
   CatalogueEntryPayload,
   LoadedCatalogueEntry,
+  LoadedCatalogueSource,
 } from '../types/catalogue';
 import { isValidCatalogueId } from './catalogueId';
 import { parseOntologyValue } from './ontologySchema';
@@ -18,8 +19,11 @@ export class CatalogueLoadError extends Error {
 const indexRequests = new Map<string, Promise<Catalogue>>();
 const indexRefreshRequests = new Map<string, Promise<Catalogue>>();
 const entryRequests = new Map<string, Promise<LoadedCatalogueEntry>>();
+const sourceRequests = new Map<string, Promise<LoadedCatalogueSource>>();
+const MAX_SOURCE_ARTIFACT_BYTES = 8 * 1024 * 1024;
 
 class StaleCataloguePayloadError extends CatalogueLoadError {}
+class StaleCatalogueSourceError extends CatalogueLoadError {}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -63,6 +67,8 @@ function parseCatalogueEntry(value: unknown): CatalogueEntry {
     'author',
     'payloadUrl',
     'payloadHash',
+    'sourceArtifactUrl',
+    'sourceArtifactHash',
   ] as const;
   for (const field of requiredStrings) {
     if (typeof value[field] !== 'string' || value[field].length === 0) {
@@ -86,6 +92,23 @@ function parseCatalogueEntry(value: unknown): CatalogueEntry {
   if (!/^sha256:[a-f0-9]{64}$/.test(value.payloadHash as string)) {
     throw new CatalogueLoadError('Catalogue entry has invalid payload hash');
   }
+  if (!/^sha256:[a-f0-9]{64}$/.test(
+    value.sourceArtifactHash as string,
+  )) {
+    throw new CatalogueLoadError(
+      'Catalogue entry has invalid source artifact hash',
+    );
+  }
+  if (
+    !Number.isInteger(value.sourceArtifactByteLength)
+    || (value.sourceArtifactByteLength as number) <= 0
+    || (value.sourceArtifactByteLength as number) > MAX_SOURCE_ARTIFACT_BYTES
+    || value.sourceArtifactMediaType !== 'application/rdf+xml'
+  ) {
+    throw new CatalogueLoadError(
+      'Catalogue entry has invalid source artifact metadata',
+    );
+  }
   if (!isValidCatalogueId(value.id as string)) {
     throw new CatalogueLoadError('Catalogue entry has invalid id');
   }
@@ -95,6 +118,16 @@ function parseCatalogueEntry(value: unknown): CatalogueEntry {
     `catalogue-payloads/${value.id}/${payloadHash.slice('sha256:'.length)}.json`;
   if (value.payloadUrl !== expectedPayloadUrl) {
     throw new CatalogueLoadError('Catalogue entry has invalid payload URL');
+  }
+  const sourceArtifactHash = value.sourceArtifactHash as string;
+  const expectedSourceArtifactUrl =
+    `catalogue-sources/${value.id}/${
+      sourceArtifactHash.slice('sha256:'.length)
+    }.rdf`;
+  if (value.sourceArtifactUrl !== expectedSourceArtifactUrl) {
+    throw new CatalogueLoadError(
+      'Catalogue entry has invalid source artifact URL',
+    );
   }
 
   return {
@@ -110,6 +143,10 @@ function parseCatalogueEntry(value: unknown): CatalogueEntry {
     relationshipCount: value.relationshipCount as number,
     payloadUrl: value.payloadUrl as string,
     payloadHash,
+    sourceArtifactUrl: value.sourceArtifactUrl as string,
+    sourceArtifactHash,
+    sourceArtifactByteLength: value.sourceArtifactByteLength as number,
+    sourceArtifactMediaType: value.sourceArtifactMediaType,
     license: optionalString(value.license, 'license'),
     sourceUrl: optionalString(value.sourceUrl, 'sourceUrl'),
     version: optionalString(value.version, 'version'),
@@ -284,7 +321,9 @@ function refreshCatalogueIndex(indexUrl: string): Promise<Catalogue> {
   return request;
 }
 
-async function hashPayload(content: string): Promise<string> {
+async function hashContent(
+  content: Uint8Array<ArrayBuffer>,
+): Promise<string> {
   if (!globalThis.crypto?.subtle) {
     throw new CatalogueLoadError(
       'This browser cannot verify catalogue payload integrity',
@@ -295,7 +334,7 @@ async function hashPayload(content: string): Promise<string> {
   try {
     digest = await globalThis.crypto.subtle.digest(
       'SHA-256',
-      new TextEncoder().encode(content),
+      content,
     );
   } catch {
     throw new CatalogueLoadError(
@@ -348,7 +387,10 @@ async function fetchCatalogueEntry(
       `Catalogue payload for "${entry.id}" could not be read`,
     );
   }
-  if (await hashPayload(content) !== entry.payloadHash) {
+  if (
+    await hashContent(new TextEncoder().encode(content))
+    !== entry.payloadHash
+  ) {
     throw new StaleCataloguePayloadError(
       `Catalogue payload integrity check failed for "${entry.id}"`,
     );
@@ -376,6 +418,78 @@ async function fetchCatalogueEntry(
     ...entry,
     ontology: payload.ontology,
     bindings: payload.bindings,
+  };
+}
+
+async function fetchCatalogueSource(
+  entry: CatalogueEntry,
+  indexUrl: string,
+): Promise<LoadedCatalogueSource> {
+  const sourceUrl = new URL(entry.sourceArtifactUrl, indexUrl);
+  const parsedIndexUrl = new URL(indexUrl);
+  if (sourceUrl.origin !== parsedIndexUrl.origin) {
+    throw new CatalogueLoadError(
+      `Original source for "${entry.id}" must use the catalogue origin`,
+    );
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(sourceUrl, { redirect: 'error' });
+  } catch (error) {
+    throw new CatalogueLoadError(
+      `Failed to load original source for "${entry.id}": ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+  if (!response.ok) {
+    const ErrorType = response.status === 404 || response.status === 410
+      ? StaleCatalogueSourceError
+      : CatalogueLoadError;
+    throw new ErrorType(
+      `Failed to load original source for "${entry.id}" (${response.status})`,
+    );
+  }
+
+  let bytes: Uint8Array<ArrayBuffer>;
+  try {
+    bytes = new Uint8Array(await response.arrayBuffer());
+  } catch {
+    throw new CatalogueLoadError(
+      `Original source for "${entry.id}" could not be read`,
+    );
+  }
+  if (
+    bytes.byteLength !== entry.sourceArtifactByteLength
+    || bytes.byteLength > MAX_SOURCE_ARTIFACT_BYTES
+  ) {
+    throw new StaleCatalogueSourceError(
+      `Original source size check failed for "${entry.id}"`,
+    );
+  }
+  if (await hashContent(bytes) !== entry.sourceArtifactHash) {
+    throw new StaleCatalogueSourceError(
+      `Original source integrity check failed for "${entry.id}"`,
+    );
+  }
+
+  let text: string;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    throw new CatalogueLoadError(
+      `Original source for "${entry.id}" is not valid UTF-8`,
+    );
+  }
+
+  return {
+    id: entry.id,
+    bytes,
+    text,
+    mediaType: entry.sourceArtifactMediaType,
+    hash: entry.sourceArtifactHash,
+    sourceArtifactUrl: entry.sourceArtifactUrl,
   };
 }
 
@@ -449,6 +563,67 @@ function requestCatalogueEntry(
   return request;
 }
 
+function requestCatalogueSource(
+  entry: CatalogueEntry,
+  indexUrl: string,
+): Promise<LoadedCatalogueSource> {
+  const cacheKey = [
+    indexUrl,
+    entry.id,
+    entry.sourceArtifactHash,
+    entry.sourceArtifactUrl,
+  ].join('#');
+  const cached = sourceRequests.get(cacheKey);
+  if (cached) return cached;
+
+  const request = fetchCatalogueSource(entry, indexUrl)
+    .catch((error) => {
+      if (sourceRequests.get(cacheKey) === request) {
+        sourceRequests.delete(cacheKey);
+      }
+      throw error;
+    });
+  sourceRequests.set(cacheKey, request);
+  return request;
+}
+
+async function loadCatalogueSourceUncached(
+  id: string,
+  baseUrl: string,
+  indexUrl: string,
+): Promise<LoadedCatalogueSource> {
+  let catalogue = await loadCatalogueIndex(baseUrl);
+  let entry = findCatalogueEntry(catalogue, id);
+  if (!entry) {
+    catalogue = await refreshCatalogueIndex(indexUrl);
+    entry = findCatalogueEntry(catalogue, id);
+    if (!entry) {
+      throw new CatalogueLoadError(
+        `Ontology "${id}" not found in catalogue`,
+      );
+    }
+  }
+
+  try {
+    return await requestCatalogueSource(entry, indexUrl);
+  } catch (error) {
+    if (!(error instanceof StaleCatalogueSourceError)) throw error;
+
+    const refreshedCatalogue = await refreshCatalogueIndex(indexUrl);
+    const refreshedEntry = findCatalogueEntry(refreshedCatalogue, id);
+    if (
+      !refreshedEntry
+      || (
+        refreshedEntry.sourceArtifactHash === entry.sourceArtifactHash
+        && refreshedEntry.sourceArtifactUrl === entry.sourceArtifactUrl
+      )
+    ) {
+      throw error;
+    }
+    return requestCatalogueSource(refreshedEntry, indexUrl);
+  }
+}
+
 export function loadCatalogueEntry(
   id: string,
   baseUrl: string = import.meta.env.BASE_URL,
@@ -457,8 +632,17 @@ export function loadCatalogueEntry(
   return loadCatalogueEntryUncached(id, baseUrl, indexUrl);
 }
 
+export function loadCatalogueSource(
+  id: string,
+  baseUrl: string = import.meta.env.BASE_URL,
+): Promise<LoadedCatalogueSource> {
+  const indexUrl = getCatalogueIndexUrl(baseUrl);
+  return loadCatalogueSourceUncached(id, baseUrl, indexUrl);
+}
+
 export function clearCatalogueCache(): void {
   indexRequests.clear();
   indexRefreshRequests.clear();
   entryRequests.clear();
+  sourceRequests.clear();
 }

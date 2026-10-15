@@ -121,4 +121,41 @@ describe('parseOntologyValue', () => {
       message: 'entityTypes[0].properties must be an array.',
     }]);
   });
+
+  it('preserves validated RDF provenance metadata', () => {
+    const candidate = validOntology() as Record<string, unknown>;
+    candidate.rdfMetadata = {
+      ontologyIri: 'https://example.org/inventory',
+      versionIri: 'https://example.org/inventory/1.0',
+      versionInfo: '1.0',
+      license: 'https://example.org/license',
+      imports: ['https://example.org/base'],
+      preservedSourceFeatures: ['owlImports', 'shacl'],
+    };
+
+    const result = parseOntologyValue(candidate, {
+      defaultEntityColors: colors,
+    });
+
+    expect(result.issues).toEqual([]);
+    expect(result.ontology?.rdfMetadata).toEqual(candidate.rdfMetadata);
+  });
+
+  it('rejects malformed RDF provenance metadata', () => {
+    const candidate = validOntology() as Record<string, unknown>;
+    candidate.rdfMetadata = {
+      imports: ['https://example.org/base', 7],
+      preservedSourceFeatures: ['shacl', 'scripts'],
+    };
+
+    const result = parseOntologyValue(candidate, {
+      defaultEntityColors: colors,
+    });
+
+    expect(result.ontology).toBeNull();
+    expect(result.issues.map((issue) => issue.path)).toEqual([
+      'rdfMetadata.preservedSourceFeatures',
+      'rdfMetadata.imports[1]',
+    ]);
+  });
 });

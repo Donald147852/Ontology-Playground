@@ -31,6 +31,7 @@ import { serializeToRDF } from '../lib/rdf/serializer';
 import { parseRDF } from '../lib/rdf/parser';
 import { highlightRdf, RDF_HIGHLIGHT_DARK, RDF_HIGHLIGHT_LIGHT } from '../lib/rdf/highlighter';
 import { loadCatalogueEntry } from '../lib/catalogue';
+import type { CatalogueEntry } from '../types/catalogue';
 import {
   BOUNDED_LABEL_ZOOM_THRESHOLD,
   createGraphView,
@@ -75,6 +76,8 @@ interface SelectedItem {
 
 export function EmbedWidget({ config }: { config: EmbedConfig }) {
   const [ontology, setOntology] = useState<Ontology | null>(null);
+  const [catalogueEntry, setCatalogueEntry] =
+    useState<CatalogueEntry | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>('graph');
@@ -102,6 +105,7 @@ export function EmbedWidget({ config }: { config: EmbedConfig }) {
             || window.location.origin + '/';
           const entry = await loadCatalogueEntry(config.catalogueId, base);
           ont = entry.ontology;
+          if (!cancelled) setCatalogueEntry(entry);
         } else if (config.ontologyUrl) {
           // Fetch from URL
           const res = await fetch(config.ontologyUrl);
@@ -119,6 +123,7 @@ export function EmbedWidget({ config }: { config: EmbedConfig }) {
         }
 
         if (!cancelled) {
+          if (!config.catalogueId) setCatalogueEntry(null);
           setOntology(ont);
           setLoading(false);
         }
@@ -177,6 +182,7 @@ export function EmbedWidget({ config }: { config: EmbedConfig }) {
         setTab={setTab}
         theme={theme}
         copied={copied}
+        isSubset={catalogueEntry?.source === 'external'}
         onCopyRdf={() => {
           navigator.clipboard.writeText(serializeToRDF(ontology, [])).then(() => {
             setCopied(true);
@@ -190,7 +196,11 @@ export function EmbedWidget({ config }: { config: EmbedConfig }) {
         {tab === 'graph' ? (
           <EmbedGraph ontology={ontology} theme={theme} selected={selected} setSelected={setSelected} />
         ) : (
-          <EmbedRdfSource ontology={ontology} theme={theme} />
+          <EmbedRdfSource
+            ontology={ontology}
+            theme={theme}
+            isSubset={catalogueEntry?.source === 'external'}
+          />
         )}
       </div>
 
@@ -210,10 +220,19 @@ interface EmbedHeaderProps {
   setTab: (t: Tab) => void;
   theme: EmbedThemeTokens;
   copied: boolean;
+  isSubset: boolean;
   onCopyRdf: () => void;
 }
 
-function EmbedHeader({ ontology, tab, setTab, theme, copied, onCopyRdf }: EmbedHeaderProps) {
+function EmbedHeader({
+  ontology,
+  tab,
+  setTab,
+  theme,
+  copied,
+  isSubset,
+  onCopyRdf,
+}: EmbedHeaderProps) {
   const tabStyle = (active: boolean): React.CSSProperties => ({
     padding: '6px 14px',
     fontSize: 12,
@@ -239,7 +258,9 @@ function EmbedHeader({ ontology, tab, setTab, theme, copied, onCopyRdf }: EmbedH
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
         <button style={tabStyle(tab === 'graph')} onClick={() => setTab('graph')}>Graph</button>
-        <button style={tabStyle(tab === 'rdf')} onClick={() => setTab('rdf')}>RDF Source</button>
+        <button style={tabStyle(tab === 'rdf')} onClick={() => setTab('rdf')}>
+          {isSubset ? 'Generated RDF subset' : 'Generated RDF'}
+        </button>
         {tab === 'rdf' && (
           <button
             onClick={onCopyRdf}
@@ -249,7 +270,7 @@ function EmbedHeader({ ontology, tab, setTab, theme, copied, onCopyRdf }: EmbedH
               border: `1px solid ${theme.border}`, borderRadius: 4, cursor: 'pointer',
             }}
           >
-            {copied ? 'Copied!' : 'Copy RDF'}
+            {copied ? 'Copied!' : 'Copy generated RDF'}
           </button>
         )}
       </div>
@@ -1049,21 +1070,48 @@ function EmbedLargeGraphControls({
 
 // ─── RDF Source ──────────────────────────────────────────────────────────────
 
-function EmbedRdfSource({ ontology, theme }: { ontology: Ontology; theme: EmbedThemeTokens }) {
+function EmbedRdfSource({
+  ontology,
+  theme,
+  isSubset,
+}: {
+  ontology: Ontology;
+  theme: EmbedThemeTokens;
+  isSubset: boolean;
+}) {
   const rdf = useMemo(() => serializeToRDF(ontology, []), [ontology]);
   const isDark = theme === EMBED_THEMES.dark;
   const hlTheme = isDark ? RDF_HIGHLIGHT_DARK : RDF_HIGHLIGHT_LIGHT;
   const highlighted = useMemo(() => highlightRdf(rdf, hlTheme), [rdf, hlTheme]);
 
   return (
-    <pre style={{
-      margin: 0, padding: 16, height: '100%', overflow: 'auto',
-      background: theme.bg, color: theme.textSecondary,
-      fontSize: 12, lineHeight: 1.6, fontFamily: "'Cascadia Code', 'Fira Code', monospace",
-      whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-    }}>
-      {highlighted}
-    </pre>
+    <div style={{ height: '100%', overflow: 'auto', background: theme.bg }}>
+      {isSubset && (
+        <div
+          role="note"
+          style={{
+            background: theme.bgSecondary,
+            borderBottom: `1px solid ${theme.border}`,
+            color: theme.textSecondary,
+            fontSize: 11,
+            lineHeight: 1.4,
+            padding: '8px 16px',
+          }}
+        >
+          Generated from the supported visual subset. Source-only SHACL rules
+          and unsupported triples are available only in the verified catalogue
+          source and are not executed here.
+        </div>
+      )}
+      <pre style={{
+        margin: 0, padding: 16, overflow: 'visible',
+        background: theme.bg, color: theme.textSecondary,
+        fontSize: 12, lineHeight: 1.6, fontFamily: "'Cascadia Code', 'Fira Code', monospace",
+        whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+      }}>
+        {highlighted}
+      </pre>
+    </div>
   );
 }
 

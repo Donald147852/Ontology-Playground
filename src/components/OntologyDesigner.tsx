@@ -6,6 +6,7 @@ import { navigate } from '../lib/router';
 import { loadCatalogueEntry } from '../lib/catalogue';
 import { EntityForm, RelationshipForm, DesignerPreview, DesignerToolbar, DesignerValidation, TemplatePicker } from './designer';
 import type { Route } from '../lib/router';
+import type { CatalogueEntry } from '../types/catalogue';
 import {
   isLargeOntologyGraph,
   ontologyGraphElementCount,
@@ -18,8 +19,24 @@ interface OntologyDesignerProps {
 export function OntologyDesigner({ route }: OntologyDesignerProps) {
   const { ontology, setOntologyName, setOntologyDescription, loadDraft, undo, redo } = useDesignerStore();
   const theme = useAppStore((s) => s.theme);
+  const currentCatalogueEntry = useAppStore(
+    (s) => s.currentCatalogueEntry,
+  );
   const isEmpty = ontology.entityTypes.length === 0 && ontology.relationships.length === 0;
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [routeCatalogueEntry, setRouteCatalogueEntry] =
+    useState<CatalogueEntry | null>(null);
+  const [designerContextCleared, setDesignerContextCleared] =
+    useState(false);
+  const editingCatalogueEntry = route.ontologyId
+    ? routeCatalogueEntry
+    : designerContextCleared
+      ? null
+      : currentCatalogueEntry;
+  const clearDesignerCatalogueContext = () => {
+    setRouteCatalogueEntry(null);
+    setDesignerContextCleared(true);
+  };
 
   // Keyboard shortcuts: Cmd/Ctrl+Z → undo, Cmd/Ctrl+Shift+Z → redo
   useEffect(() => {
@@ -39,9 +56,14 @@ export function OntologyDesigner({ route }: OntologyDesignerProps) {
 
   // Load existing ontology into the designer when editing via /#/designer/<id>
   useEffect(() => {
-    if (!route.ontologyId) return;
+    if (!route.ontologyId) {
+      setRouteCatalogueEntry(null);
+      setDesignerContextCleared(false);
+      return;
+    }
     const id = route.ontologyId;
     let cancelled = false;
+    setRouteCatalogueEntry(null);
     setLoadError(null);
 
     loadCatalogueEntry(id)
@@ -54,6 +76,7 @@ export function OntologyDesigner({ route }: OntologyDesignerProps) {
           );
           return;
         }
+        setRouteCatalogueEntry(entry);
         loadDraft(entry.ontology);
       })
       .catch((error) => {
@@ -94,22 +117,38 @@ export function OntologyDesigner({ route }: OntologyDesignerProps) {
             placeholder="Description"
           />
         </div>
-        <DesignerToolbar />
+        <DesignerToolbar
+          catalogueEntry={editingCatalogueEntry}
+          onNewOntology={clearDesignerCatalogueContext}
+        />
       </div>
       {loadError && <div role="alert" className="designer-import-error">{loadError}</div>}
+      {editingCatalogueEntry?.source === 'external' && (
+        <div role="note" className="designer-source-fidelity-warning">
+          Editing {editingCatalogueEntry.name} changes only the supported visual
+          subset. Designer exports do not reproduce source-only SHACL rules or
+          unsupported triples; the catalogue retains the verified original.
+        </div>
+      )}
 
       {/* Split pane */}
       <div className="designer-split">
         {/* Left: editor forms */}
         <div className="designer-sidebar">
-          {isEmpty && <TemplatePicker />}
+          {isEmpty && (
+            <TemplatePicker
+              onTemplateSelected={clearDesignerCatalogueContext}
+            />
+          )}
           <DesignerValidation />
           <EntityForm />
           <RelationshipForm />
         </div>
 
         {/* Right: live preview */}
-        <DesignerPreview />
+        <DesignerPreview
+          onOntologyReplaced={clearDesignerCatalogueContext}
+        />
       </div>
     </div>
   );

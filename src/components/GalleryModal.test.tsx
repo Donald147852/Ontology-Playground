@@ -71,15 +71,31 @@ const fakePayloads: Record<string, CatalogueEntryPayload> = {
   },
 };
 
+const fakeSources: Record<string, string> = Object.fromEntries(
+  Object.keys(fakePayloads).map((id) => [
+    id,
+    `<?xml version="1.0" encoding="UTF-8"?>\n<rdf:RDF data-id="${id}" />\n`,
+  ]),
+);
+
 function createEntry(
   metadata: Omit<
     CatalogueEntry,
-    'entityCount' | 'relationshipCount' | 'payloadUrl' | 'payloadHash'
+    | 'entityCount'
+    | 'relationshipCount'
+    | 'payloadUrl'
+    | 'payloadHash'
+    | 'sourceArtifactUrl'
+    | 'sourceArtifactHash'
+    | 'sourceArtifactByteLength'
+    | 'sourceArtifactMediaType'
   >,
 ): CatalogueEntry {
   const payload = fakePayloads[metadata.id];
   const content = JSON.stringify(payload, null, 2) + '\n';
   const hash = createHash('sha256').update(content).digest('hex');
+  const source = fakeSources[metadata.id];
+  const sourceHash = createHash('sha256').update(source).digest('hex');
 
   return {
     ...metadata,
@@ -87,6 +103,11 @@ function createEntry(
     relationshipCount: payload.ontology.relationships.length,
     payloadUrl: `catalogue-payloads/${metadata.id}/${hash}.json`,
     payloadHash: `sha256:${hash}`,
+    sourceArtifactUrl:
+      `catalogue-sources/${metadata.id}/${sourceHash}.rdf`,
+    sourceArtifactHash: `sha256:${sourceHash}`,
+    sourceArtifactByteLength: new TextEncoder().encode(source).byteLength,
+    sourceArtifactMediaType: 'application/rdf+xml',
   };
 }
 
@@ -125,7 +146,7 @@ const fakeCatalogue: Catalogue = {
       category: 'finance',
       tags: ['finance', 'ledger'],
       author: 'FinCorp',
-      source: 'official',
+      source: 'external',
     }),
   ],
 };
@@ -145,22 +166,31 @@ function mockFetchSuccess(
 
     const entry = data.entries.find((candidate) =>
       url.endsWith(candidate.payloadUrl));
-    if (!entry) {
+    if (entry) {
+      const failureStatus = payloadFailures[entry.id];
+      if (failureStatus) {
+        return new Response('payload unavailable', { status: failureStatus });
+      }
+
+      return new Response(
+        JSON.stringify(fakePayloads[entry.id], null, 2) + '\n',
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      );
+    }
+
+    const sourceEntry = data.entries.find((candidate) =>
+      url.endsWith(candidate.sourceArtifactUrl));
+    if (!sourceEntry) {
       return new Response('not found', { status: 404 });
     }
 
-    const failureStatus = payloadFailures[entry.id];
-    if (failureStatus) {
-      return new Response('payload unavailable', { status: failureStatus });
-    }
-
-    return new Response(
-      JSON.stringify(fakePayloads[entry.id], null, 2) + '\n',
-      {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      },
-    );
+    return new Response(fakeSources[sourceEntry.id], {
+      status: 200,
+      headers: { 'Content-Type': 'application/rdf+xml' },
+    });
   });
 }
 
@@ -517,6 +547,59 @@ describe('GalleryModal', () => {
     expect(sourceLink.getAttribute('rel')).toBe('noopener noreferrer');
   });
 
+  it('loads and identifies the hash-verified original source', async () => {
+    const fetchMock = mockFetchSuccess();
+    const user = userEvent.setup();
+    render(<GalleryModal onClose={onClose} />);
+
+    await screen.findByText('Fourth Coffee');
+    await user.click(screen.getByRole('button', {
+      name: 'View original RDF source for Fourth Coffee',
+    }));
+
+    expect(await screen.findByText('Original reviewed RDF source')).toBeTruthy();
+    expect(Array.from(document.querySelectorAll('pre')).some(
+      (element) =>
+        element.textContent === fakeSources['official/cosmic-coffee'],
+    )).toBe(true);
+    expect(Array.from(document.querySelectorAll('code')).some(
+      (element) =>
+        element.textContent?.includes(
+          fakeCatalogue.entries[0].sourceArtifactHash,
+        ),
+    )).toBe(true);
+    expect(fetchMock.mock.calls.some(([input]) =>
+      input.toString().endsWith(
+        fakeCatalogue.entries[0].sourceArtifactUrl,
+      ),
+    )).toBe(true);
+    expect(fetchMock.mock.calls.some(([input]) =>
+      input.toString() === fakeCatalogue.entries[0].sourceUrl,
+    )).toBe(false);
+  });
+
+  it('labels external graph and generated RDF as a subset', async () => {
+    mockFetchSuccess();
+    const user = userEvent.setup();
+    render(<GalleryModal onClose={onClose} />);
+
+    await screen.findByText('Finance Ledger');
+    expect(screen.getByText(
+      /The graph and Designer use a supported visual subset/,
+    )).toBeTruthy();
+
+    await user.click(screen.getByRole('button', {
+      name: 'View generated RDF for Finance Ledger',
+    }));
+
+    expect(await screen.findByText(
+      'Playground-generated RDF subset',
+    )).toBeTruthy();
+    expect(screen.getByText(
+      /source-only SHACL rules and unsupported triples can be omitted/,
+    )).toBeTruthy();
+  });
+
   it('displays entity and relationship counts', async () => {
     mockFetchSuccess();
     render(<GalleryModal onClose={onClose} />);
@@ -557,6 +640,9 @@ describe('GalleryModal', () => {
     const appState = useAppStore.getState();
     expect(appState.currentOntology.name).toBe('Fourth Coffee');
     expect(appState.currentOntology.entityTypes).toHaveLength(3);
+    expect(appState.currentCatalogueEntry?.id).toBe(
+      'official/cosmic-coffee',
+    );
 
     // Should navigate to designer, NOT to home
     expect(window.location.hash).toBe('#/designer');
