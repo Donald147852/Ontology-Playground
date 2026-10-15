@@ -1024,10 +1024,59 @@ body {
   background: var(--bg-elevated);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
-  padding: 16px;
   min-width: 180px;
-  max-height: 40vh;
+  /* Never let a large ontology's legend blanket the canvas it sits on. */
+  max-height: 45%;
+  display: flex;
+  flex-direction: column;
+}
+
+.graph-legend--collapsed {
+  min-width: 0;
+  max-height: none;
+}
+
+.legend-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 14px 16px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-lg);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.legend-toggle:hover {
+  color: var(--text-primary);
+}
+
+.legend-toggle:focus-visible {
+  outline: 2px solid var(--ms-blue);
+  outline-offset: -2px;
+}
+
+.legend-count {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+.legend-body {
+  padding: 0 16px 14px;
   overflow-y: auto;
+}
+
+.legend-more {
+  color: var(--text-secondary);
+  font-size: 12px;
 }
 
 .legend-title {
@@ -1035,7 +1084,6 @@ body {
   font-weight: 600;
   color: var(--text-secondary);
   text-transform: uppercase;
-  margin-bottom: 12px;
 }
 
 .legend-item {
@@ -1051,6 +1099,44 @@ body {
   width: 12px;
   height: 12px;
   border-radius: 50%;
+}
+
+.graph-export-error {
+  position: absolute;
+  z-index: 4;
+  bottom: 84px;
+  left: 24px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(440px, calc(100% - 48px));
+  padding: 10px 12px;
+  box-sizing: border-box;
+  background: color-mix(in srgb, var(--ms-red) 14%, var(--bg-elevated));
+  color: var(--text-primary);
+  border: 1px solid var(--ms-red);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.graph-export-error > span {
+  flex: 1;
+}
+
+.graph-export-error > button {
+  display: inline-flex;
+  padding: 4px;
+  background: transparent;
+  color: inherit;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.graph-export-error > button:hover {
+  background: color-mix(in srgb, var(--ms-red) 20%, transparent);
 }
 
 /* Right Sidebar Container */

@@ -15,7 +15,20 @@ import type {
   LayoutOptions,
 } from 'cytoscape';
 import { useAppStore } from '../store/appStore';
-import { ZoomIn, ZoomOut, Maximize2, RotateCcw, Download, Crosshair } from 'lucide-react';
+import {
+  AlertTriangle,
+  Crosshair,
+  Download,
+  Maximize2,
+  RotateCcw,
+  X,
+  ZoomIn,
+  ZoomOut,
+} from 'lucide-react';
+import {
+  createPngExportOptions,
+  isValidPngBlob,
+} from '../lib/graphExport';
 import {
   BOUNDED_LABEL_ZOOM_THRESHOLD,
   createGraphView,
@@ -30,6 +43,7 @@ import {
   restoreGraphViewport,
   type GraphPositionSnapshot,
 } from '../lib/graphPositionPersistence';
+import { GraphLegend } from './GraphLegend';
 import { LargeGraphControls } from './LargeGraphControls';
 import { useGraphNodeActionPosition } from './useGraphNodeActionPosition';
 
@@ -118,6 +132,8 @@ export function OntologyGraph() {
     () => new Set(),
   );
   const [graphZoom, setGraphZoom] = useState(MIN_GRAPH_ZOOM);
+  const [isExportingPng, setIsExportingPng] = useState(false);
+  const [pngExportError, setPngExportError] = useState<string | null>(null);
   const pendingPositionSnapshotRef = useRef<GraphPositionSnapshot | null>(null);
   const skipNextProjectionSnapshotRef = useRef(false);
   
@@ -977,22 +993,54 @@ export function OntologyGraph() {
     clearSelectionOutsideView(nextView);
   };
 
-  const handleDownload = () => {
+  const handleDownload = async () => {
+    if (isExportingPng) return;
+
     const cy = getCy();
-    if (!cy) return;
+    if (!cy) {
+      setPngExportError('The graph is not ready to export yet. Try again in a moment.');
+      return;
+    }
+
+    setPngExportError(null);
+    setIsExportingPng(true);
+
     try {
       const graphCs = containerRef.current ? getComputedStyle(containerRef.current) : null;
       const bg = (graphCs && graphCs.getPropertyValue('--graph-bg').trim()) || (darkMode ? '#1E1E1E' : '#F5F5F5');
-      const pngData = cy.png({ scale: 2, full: true, bg });
+      const bb = cy.elements().boundingBox();
+      const pngBlob = await cy.png(
+        createPngExportOptions(bb.w, bb.h, bg),
+      );
+      if (!(await isValidPngBlob(pngBlob))) {
+        throw new Error('The browser returned an invalid or empty PNG.');
+      }
+
+      const url = URL.createObjectURL(pngBlob);
       const link = document.createElement('a');
-      link.href = pngData;
+      link.href = url;
       const safeName = (currentOntology.name || 'ontology').toLowerCase().replace(/\s+/g, '-');
       link.download = `${safeName}-graph.png`;
-      link.click();
-    } catch { /* ignore */ }
+      document.body.appendChild(link);
+      try {
+        link.click();
+      } finally {
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      }
+    } catch (error) {
+      console.error('PNG export failed', error);
+      if (mountedRef.current) {
+        setPngExportError(
+          'Could not create a PNG in this browser. Reduce the visible graph with search or detail controls, then try again.',
+        );
+      }
+    } finally {
+      if (mountedRef.current) setIsExportingPng(false);
+    }
   };
 
-  const legendLimit = isBoundedView ? 8 : 100;
+  const legendLimit = 100;
   const legendEntities = graphView.entities.slice(0, legendLimit);
   const hiddenLegendCount = graphView.entities.length - legendEntities.length;
   const canResetLargeView = (
@@ -1093,26 +1141,50 @@ export function OntologyGraph() {
         <button className="graph-control-btn" onClick={handleReset} title="Reset Layout">
           <RotateCcw size={18} />
         </button>
-        <button className="graph-control-btn" onClick={handleDownload} title="Download Graph as PNG" data-testid="download-ontology-png">
+        <button
+          className="graph-control-btn"
+          onClick={handleDownload}
+          title={
+            isExportingPng
+              ? 'Preparing PNG'
+              : isBoundedView
+                ? 'Download Visible Graph as PNG'
+                : 'Download Graph as PNG'
+          }
+          aria-label={
+            isExportingPng
+              ? 'Preparing PNG'
+              : isBoundedView
+                ? 'Download Visible Graph as PNG'
+                : 'Download Graph as PNG'
+          }
+          aria-busy={isExportingPng}
+          disabled={isExportingPng}
+          data-testid="download-ontology-png"
+        >
           <Download size={18} />
         </button>
       </div>
 
-      {!isBoundedView && (
-        <div className="graph-legend">
-          <div className="legend-title">Entity Types</div>
-          {legendEntities.map(entity => (
-            <div key={entity.id} className="legend-item">
-              <div className="legend-dot" style={{ backgroundColor: entity.color }} />
-              <span>{entity.icon} {entity.name}</span>
-            </div>
-          ))}
-          {hiddenLegendCount > 0 && (
-            <div className="legend-item">
-              <span>+ {hiddenLegendCount} more visible in the graph</span>
-            </div>
-          )}
+      {pngExportError && (
+        <div className="graph-export-error" role="alert">
+          <AlertTriangle size={18} aria-hidden="true" />
+          <span>{pngExportError}</span>
+          <button
+            type="button"
+            onClick={() => setPngExportError(null)}
+            aria-label="Dismiss PNG export error"
+          >
+            <X size={16} aria-hidden="true" />
+          </button>
         </div>
+      )}
+
+      {!isBoundedView && (
+        <GraphLegend
+          entityTypes={legendEntities}
+          hiddenCount={hiddenLegendCount}
+        />
       )}
     </div>
   );
