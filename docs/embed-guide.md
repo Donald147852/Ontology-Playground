@@ -140,6 +140,8 @@ This scans the DOM for new `.ontology-embed` elements and mounts widgets on any 
 - **Adaptive large-ontology view** — massive ontologies open as a bounded
   semantic overview with search, adjustable hierarchy depth, and incremental
   `+N` boundary expansion that can be hidden again from the overview controls;
+  expansions never evict entities already on screen, and the controls explain
+  when the 180-entity limit requires hiding a shown neighborhood first;
   changing hierarchy depth clears the current selection and focus, while
   off-thumb track clicks, dragging, touch, and arrow-key adjustments are all
   supported

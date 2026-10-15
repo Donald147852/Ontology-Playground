@@ -26,6 +26,7 @@ export interface GraphViewOptions {
   search?: string;
   depth?: number;
   expandedNodeIds?: Iterable<string>;
+  priorityEntityIds?: Iterable<string>;
   priorityRelationshipIds?: Iterable<string>;
 }
 
@@ -79,6 +80,7 @@ function isHierarchyRelationship(relationship: Relationship): boolean {
 function findRootIds(
   entityIds: readonly string[],
   relationships: readonly Relationship[],
+  hierarchyDirected = false,
 ): string[] {
   const incoming = new Map(entityIds.map((id) => [id, 0]));
   const outgoing = new Map(entityIds.map((id) => [id, 0]));
@@ -106,9 +108,11 @@ function findRootIds(
   const isolated = entityIds.filter(
     (id) => incoming.get(id) === 0 && outgoing.get(id) === 0,
   );
-  const connectedRoots = sinks.length > 0 && sources.length > 0
-    ? (sinks.length <= sources.length ? sinks : sources)
-    : (sinks.length > 0 ? sinks : sources);
+  const connectedRoots = hierarchyDirected
+    ? sinks
+    : sinks.length > 0 && sources.length > 0
+      ? (sinks.length <= sources.length ? sinks : sources)
+      : (sinks.length > 0 ? sinks : sources);
   const roots = [...connectedRoots, ...isolated];
 
   return (roots.length > 0 ? roots : entityIds).slice(0, MAX_ROOT_SEEDS);
@@ -189,6 +193,7 @@ function buildGraphTopology(ontology: Ontology): GraphTopology {
     hierarchyRelationships.length > 0
       ? hierarchyRelationships
       : validRelationships,
+    hierarchyRelationships.length > 0,
   );
   const adjacency = buildUndirectedAdjacency(entityIds, validRelationships);
   const hierarchyChildren = hierarchyRelationships.length > 0
@@ -353,6 +358,9 @@ export function createGraphView(
   const expandedNodeIds = new Set(
     [...(options.expandedNodeIds ?? [])].filter((id) => entityIds.has(id)),
   );
+  const priorityEntityIds = new Set(
+    [...(options.priorityEntityIds ?? [])].filter((id) => entityIds.has(id)),
+  );
   const priorityRelationshipIds = new Set(
     options.priorityRelationshipIds ?? [],
   );
@@ -360,26 +368,49 @@ export function createGraphView(
     priorityRelationshipIds.has(relationship.id)
   ));
   for (const relationship of priorityRelationships) {
-    expandedNodeIds.add(relationship.from);
-    expandedNodeIds.add(relationship.to);
+    priorityEntityIds.add(relationship.from);
+    priorityEntityIds.add(relationship.to);
   }
   const selectedIds = new Set<string>();
-  const nodeLimit = (
+  const baseNodeLimit = (
     searchMatches.length === 0
-    && expandedNodeIds.size === 0
     && depth === DEFAULT_LARGE_GRAPH_DEPTH
   )
     ? DEFAULT_OVERVIEW_NODE_LIMIT
     : MAX_RENDERED_NODES;
 
-  addNeighborhood(selectedIds, adjacency, expandedNodeIds, 1, nodeLimit);
+  for (const id of priorityEntityIds) {
+    if (selectedIds.size >= MAX_RENDERED_NODES) break;
+    selectedIds.add(id);
+  }
+  const baseIds = new Set<string>();
   addNeighborhood(
-    selectedIds,
+    baseIds,
     searchMatches.length > 0 ? adjacency : hierarchyChildren,
     primarySeeds,
     depth,
-    nodeLimit,
+    baseNodeLimit,
   );
+  for (const id of baseIds) {
+    if (selectedIds.size >= MAX_RENDERED_NODES) break;
+    selectedIds.add(id);
+  }
+  addNeighborhood(
+    selectedIds,
+    adjacency,
+    priorityEntityIds,
+    1,
+    MAX_RENDERED_NODES,
+  );
+  for (const id of expandedNodeIds) {
+    addNeighborhood(
+      selectedIds,
+      adjacency,
+      [id],
+      1,
+      MAX_RENDERED_NODES,
+    );
+  }
 
   if (selectedIds.size === 0 && ontology.entityTypes[0]) {
     selectedIds.add(ontology.entityTypes[0].id);
@@ -396,22 +427,26 @@ export function createGraphView(
   const remainingRelationships = visibleRelationships.filter(
     (relationship) => !priorityRelationshipIds.has(relationship.id),
   );
+  const foregroundNodeIds = new Set([
+    ...priorityEntityIds,
+    ...expandedNodeIds,
+  ]);
   const relationships = [
     ...visibleRelationships.filter((relationship) => (
       priorityRelationshipIds.has(relationship.id)
     )),
     ...remainingRelationships.filter((relationship) => (
-      expandedNodeIds.has(relationship.from)
-      || expandedNodeIds.has(relationship.to)
+      foregroundNodeIds.has(relationship.from)
+      || foregroundNodeIds.has(relationship.to)
     )),
     ...remainingRelationships.filter((relationship) => (
-      !expandedNodeIds.has(relationship.from)
-      && !expandedNodeIds.has(relationship.to)
+      !foregroundNodeIds.has(relationship.from)
+      && !foregroundNodeIds.has(relationship.to)
       && isHierarchyRelationship(relationship)
     )),
     ...remainingRelationships.filter((relationship) => (
-      !expandedNodeIds.has(relationship.from)
-      && !expandedNodeIds.has(relationship.to)
+      !foregroundNodeIds.has(relationship.from)
+      && !foregroundNodeIds.has(relationship.to)
       && !isHierarchyRelationship(relationship)
     )),
   ].slice(0, MAX_RENDERED_EDGES);

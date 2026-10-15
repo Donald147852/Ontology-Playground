@@ -92,6 +92,39 @@ function createDenseOntology(): Ontology {
   };
 }
 
+function createWideOntology(): Ontology {
+  const root = {
+    id: 'root',
+    name: 'Root',
+    description: 'Wide embedded hierarchy root',
+    icon: 'R',
+    color: '#0078D4',
+    properties: [],
+  };
+  const children = Array.from({ length: 349 }, (_, index) => ({
+    id: `child-${index}`,
+    name: `Child ${index}`,
+    description: `Wide embedded hierarchy child ${index}`,
+    icon: 'C',
+    color: '#107C10',
+    properties: [],
+  }));
+
+  return {
+    name: 'Wide Embedded Taxonomy',
+    description: 'A root with more children than the graph budget',
+    entityTypes: [root, ...children],
+    relationships: children.map((child, index) => ({
+      id: `parent-${index}`,
+      name: 'subClassOf',
+      from: child.id,
+      to: root.id,
+      cardinality: 'many-to-one',
+      kind: 'subclass',
+    })),
+  };
+}
+
 function mockFetch(data: unknown, ok = true) {
   vi.spyOn(globalThis, 'fetch').mockResolvedValue({
     ok,
@@ -484,6 +517,45 @@ describe('EmbedWidget', () => {
     ).toBeDisabled();
   });
 
+  it('keeps partial embedded expansions reversible at the view limit', async () => {
+    const ontology = createWideOntology();
+    const initialHiddenCount = createGraphView(ontology)
+      .hiddenNeighborCounts.get('root');
+    expect(initialHiddenCount).toBe(290);
+    const config: EmbedConfig = {
+      ontologyInline: btoa(JSON.stringify(ontology)),
+      theme: 'dark',
+      height: '500px',
+    };
+
+    render(<EmbedWidget config={config} />);
+
+    await screen.findByRole('region', { name: 'Large ontology controls' });
+    const nodeTapHandlers = embedGraphMocks.handlers['tap:node'];
+    act(() => {
+      nodeTapHandlers.at(-1)?.({
+        target: { id: () => 'root' },
+      });
+    });
+
+    fireEvent.click(screen.getByRole('button', {
+      name: `Show ${initialHiddenCount} hidden neighbors for Root`,
+    }));
+    await waitFor(() => {
+      expect(embedGraphMocks.cytoscape).toHaveBeenCalledTimes(2);
+    });
+
+    expect(screen.getByRole('button', {
+      name: 'Hide shown neighbors for Root',
+    })).toBeEnabled();
+    expect(screen.getByRole('status')).toHaveTextContent(
+      '170 neighbors remain hidden because the 180-entity view limit is full.',
+    );
+    expect(screen.queryByRole('button', {
+      name: /Expand Root to show/,
+    })).not.toBeInTheDocument();
+  });
+
   it('clears a deep embed selection when lowering hierarchy detail', async () => {
     const ontology = createLargeOntology();
     const initialView = createGraphView(ontology, { depth: 1 });
@@ -552,5 +624,36 @@ describe('EmbedWidget', () => {
     await user.click(screen.getByRole('button', { name: 'Find' }));
 
     expect(await screen.findByText('1 matching entity.')).toBeInTheDocument();
+  });
+
+  it('gives each embedded detail slider a unique labelled ID', async () => {
+    const ontologyInline = btoa(JSON.stringify(createLargeOntology()));
+    const config: EmbedConfig = {
+      ontologyInline,
+      theme: 'dark',
+      height: '400px',
+    };
+
+    render(
+      <>
+        <EmbedWidget config={config} />
+        <EmbedWidget config={config} />
+      </>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('slider')).toHaveLength(2);
+    });
+    const sliders = screen.getAllByRole('slider');
+    const sliderIds = sliders.map((slider) => slider.id);
+    const matchingLabels = [...document.querySelectorAll('label')].filter(
+      (label) => sliderIds.includes(label.htmlFor),
+    );
+
+    expect(new Set(sliderIds).size).toBe(2);
+    expect(sliderIds.every(Boolean)).toBe(true);
+    expect(matchingLabels.map((label) => label.htmlFor).sort()).toEqual(
+      [...sliderIds].sort(),
+    );
   });
 });

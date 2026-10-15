@@ -65,6 +65,13 @@ describe('SemanticDepthSlider', () => {
       />,
     );
     const slider = screen.getByRole('slider', { name: 'Detail' });
+    expect(slider).toHaveClass('semantic-depth-slider');
+    expect(slider).toHaveStyle({
+      '--semantic-depth-thumb-size': '28px',
+    });
+    expect(
+      document.getElementById('semantic-depth-slider-styles'),
+    ).toHaveTextContent('.semantic-depth-slider::-webkit-slider-thumb');
     vi.spyOn(slider, 'getBoundingClientRect').mockReturnValue({
       bottom: 44,
       height: 44,

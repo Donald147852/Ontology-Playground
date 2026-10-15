@@ -15,6 +15,7 @@ interface LargeGraphControlsProps {
     name: string;
     hiddenNeighborCount: number;
     isExpanded: boolean;
+    canExpand: boolean;
   } | null;
   onSearchInputChange: (value: string) => void;
   onSearch: () => void;
@@ -132,6 +133,7 @@ export function LargeGraphControls({
               ? (
                 <button
                   type="button"
+                  disabled={!selectedEntity.canExpand}
                   aria-label={`Show ${selectedEntity.hiddenNeighborCount} hidden ${
                     selectedEntity.hiddenNeighborCount === 1
                       ? 'neighbor'
@@ -152,21 +154,30 @@ export function LargeGraphControls({
                 </button>
               )}
           </div>
-
-          {appliedSearch && (
-            <div className="large-graph-status" aria-live="polite">
-              {graphView.searchMatchCount > 0 ? (
+          <div className="large-graph-status" aria-live="polite">
+            {selectedEntity
+              && selectedEntity.hiddenNeighborCount > 0
+              && !selectedEntity.canExpand ? (
+                <p className="large-graph-warning" role="status">
+                  {selectedEntity.hiddenNeighborCount.toLocaleString()}{' '}
+                  {selectedEntity.hiddenNeighborCount === 1
+                    ? 'neighbor remains'
+                    : 'neighbors remain'}{' '}
+                  hidden because the{' '}
+                  {graphView.visibleNodeCount.toLocaleString()}-entity view
+                  limit is full. Hide a shown neighborhood to make room.
+                </p>
+              ) : appliedSearch && graphView.searchMatchCount > 0 ? (
                 <p className="large-graph-result">
                   {graphView.searchMatchCount.toLocaleString()} matching{' '}
                   {graphView.searchMatchCount === 1 ? 'entity' : 'entities'}.
                 </p>
-              ) : (
+              ) : appliedSearch ? (
                 <p className="large-graph-warning" role="alert">
                   No matching entity was found. Showing hierarchy roots instead.
                 </p>
-              )}
-            </div>
-          )}
+              ) : null}
+          </div>
           <p className="large-graph-hint">
             Select a dashed “+N” entity to show its neighbor action beside the
             node. Hide a shown neighborhood here, or select another “+N” entity

@@ -12,6 +12,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useRef,
   useState,
   useMemo,
@@ -34,6 +35,7 @@ import {
   createGraphView,
   DEFAULT_LARGE_GRAPH_DEPTH,
   graphViewMaxDepth,
+  MAX_RENDERED_NODES,
   type GraphView,
 } from '../lib/graphView';
 import {
@@ -270,6 +272,7 @@ interface EmbedGraphProps {
 }
 
 function EmbedGraph({ ontology, theme, selected, setSelected }: EmbedGraphProps) {
+  const depthSliderId = useId();
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
   const [graphInstance, setGraphInstance] = useState<Core | null>(null);
@@ -318,11 +321,13 @@ function EmbedGraph({ ontology, theme, selected, setSelected }: EmbedGraphProps)
       hiddenNeighborCount:
         graphView.hiddenNeighborCounts.get(entity.id) ?? 0,
       isExpanded: expandedNodeIds.has(entity.id),
+      canExpand: graphView.visibleNodeCount < MAX_RENDERED_NODES,
     };
   }, [
     expandedNodeIds,
     graphView.entities,
     graphView.hiddenNeighborCounts,
+    graphView.visibleNodeCount,
     selected,
   ]);
   const neighborActionPosition = useGraphNodeActionPosition(
@@ -330,7 +335,8 @@ function EmbedGraph({ ontology, theme, selected, setSelected }: EmbedGraphProps)
     selectedOverviewEntity?.id ?? null,
     graphView.mode === 'bounded'
       && (selectedOverviewEntity?.hiddenNeighborCount ?? 0) > 0
-      && !selectedOverviewEntity?.isExpanded,
+      && !selectedOverviewEntity?.isExpanded
+      && selectedOverviewEntity?.canExpand === true,
   );
   const graphOntologyRef = useRef(ontology);
 
@@ -651,6 +657,7 @@ function EmbedGraph({ ontology, theme, selected, setSelected }: EmbedGraphProps)
       !selectedOverviewEntity
       || selectedOverviewEntity.hiddenNeighborCount === 0
       || selectedOverviewEntity.isExpanded
+      || !selectedOverviewEntity.canExpand
     ) {
       return;
     }
@@ -750,6 +757,7 @@ function EmbedGraph({ ontology, theme, selected, setSelected }: EmbedGraphProps)
             || selected !== null
           )}
           selectedEntity={selectedOverviewEntity}
+          depthSliderId={depthSliderId}
           theme={theme}
           onSearchInputChange={setSearchInput}
           onSearch={handleSearch}
@@ -776,7 +784,9 @@ interface EmbedLargeGraphControlsProps {
     name: string;
     hiddenNeighborCount: number;
     isExpanded: boolean;
+    canExpand: boolean;
   } | null;
+  depthSliderId: string;
   theme: EmbedThemeTokens;
   onSearchInputChange: (value: string) => void;
   onSearch: () => void;
@@ -796,6 +806,7 @@ function EmbedLargeGraphControls({
   maxDepth,
   canReset,
   selectedEntity,
+  depthSliderId,
   theme,
   onSearchInputChange,
   onSearch,
@@ -900,7 +911,7 @@ function EmbedLargeGraphControls({
               minHeight: 44,
             }}>
               <label
-                htmlFor="embed-graph-depth"
+                htmlFor={depthSliderId}
                 style={{ color: theme.textSecondary, whiteSpace: 'nowrap' }}
               >
                 Detail: <strong>{depth} {depth === 1 ? 'hop' : 'hops'}</strong>
@@ -921,7 +932,7 @@ function EmbedLargeGraphControls({
               </button>
             </div>
             <SemanticDepthSlider
-              id="embed-graph-depth"
+              id={depthSliderId}
               max={maxDepth}
               value={depth}
               disabled={maxDepth <= 1}
@@ -934,6 +945,7 @@ function EmbedLargeGraphControls({
                 minHeight: 44,
                 margin: '6px 0 0',
                 accentColor: theme.accent,
+                color: theme.accent,
               }}
             />
           </div>
@@ -957,12 +969,19 @@ function EmbedLargeGraphControls({
               ? (
                 <button
                   type="button"
+                  disabled={!selectedEntity.canExpand}
                   aria-label={`Show ${selectedEntity.hiddenNeighborCount} hidden ${
                     selectedEntity.hiddenNeighborCount === 1
                       ? 'neighbor'
                       : 'neighbors'
                   } for ${selectedEntity.name}`}
-                  style={{ ...buttonStyle, width: '100%' }}
+                  style={{
+                    ...buttonStyle,
+                    width: '100%',
+                    ...(!selectedEntity.canExpand
+                      ? { cursor: 'not-allowed', opacity: 0.5 }
+                      : {}),
+                  }}
                   onClick={onExpandSelectedEntity}
                 >
                   Show {selectedEntity.hiddenNeighborCount.toLocaleString()}{' '}
@@ -987,21 +1006,40 @@ function EmbedLargeGraphControls({
                 </button>
               )}
           </div>
-          {appliedSearch && (
-            <div
-              role={graphView.searchMatchCount === 0 ? 'alert' : 'status'}
-              style={{
-                minHeight: 30,
-                marginTop: 8,
-                color: graphView.searchMatchCount === 0 ? '#D83B01' : theme.textSecondary,
-                lineHeight: 1.35,
-              }}
-            >
-              {graphView.searchMatchCount === 0
-                ? 'No match. Showing hierarchy roots.'
-                : `${graphView.searchMatchCount} matching ${graphView.searchMatchCount === 1 ? 'entity' : 'entities'}.`}
-            </div>
-          )}
+          <div
+            role={appliedSearch && graphView.searchMatchCount === 0
+              ? 'alert'
+              : 'status'}
+            style={{
+              height: 52,
+              marginTop: 8,
+              overflowY: 'auto',
+              color: (
+                appliedSearch && graphView.searchMatchCount === 0
+                  ? '#D83B01'
+                  : theme.textSecondary
+              ),
+              lineHeight: 1.35,
+            }}
+          >
+            {selectedEntity
+              && selectedEntity.hiddenNeighborCount > 0
+              && !selectedEntity.canExpand
+              ? `${selectedEntity.hiddenNeighborCount.toLocaleString()} ${
+                selectedEntity.hiddenNeighborCount === 1
+                  ? 'neighbor remains'
+                  : 'neighbors remain'
+              } hidden because the ${
+                graphView.visibleNodeCount.toLocaleString()
+              }-entity view limit is full. Hide a shown neighborhood to make room.`
+              : appliedSearch
+                ? graphView.searchMatchCount === 0
+                  ? 'No match. Showing hierarchy roots.'
+                  : `${graphView.searchMatchCount} matching ${
+                    graphView.searchMatchCount === 1 ? 'entity' : 'entities'
+                  }.`
+                : null}
+          </div>
           <div style={{ marginTop: 8, color: theme.textTertiary, lineHeight: 1.35 }}>
             Select a dashed “+N” entity to show its neighbor action beside the
             {' '}node. Hide a shown neighborhood here, or select another “+N”

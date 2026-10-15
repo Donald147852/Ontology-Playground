@@ -43,6 +43,7 @@ export function HelpModal({ onClose }: HelpModalProps) {
               Use its search and detail controls to navigate the hierarchy. A dashed node labeled <strong>+N</strong> has hidden neighbors;
               select it and choose the <strong>Show neighbors</strong> action beside the node to expand it without moving the entities already on screen.
               Use <strong>Hide shown neighbors</strong> in the Semantic overview to collapse that node-specific expansion again.
+              If the view limit is full, the overview explains how many neighbors remain hidden and asks you to hide a shown neighborhood before expanding another.
               Changing the detail level starts an unfocused hierarchy projection, clears the current selection, and collapses node-specific expansions.
               Click either side of the detail slider thumb to change hops, drag the thumb, or use the arrow keys.
               Selecting an entity labels every visible relationship connected to it;

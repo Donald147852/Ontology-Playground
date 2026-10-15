@@ -61,10 +61,13 @@ without drawing the entire ontology at once. Selecting an entity does not move
 the graph; selecting a `+N` entity exposes a neighbor action beside that node.
 Expansion keeps existing entities and the viewport anchored while placing
 newly revealed hierarchy branches to avoid crossings where possible. The
-Semantic overview can hide the selected entity's shown neighborhood again, and
-all node-specific expansions and the current selection/focus clear when the
+Semantic overview can hide the selected entity's shown neighborhood again. When
+its 180-entity view limit is full it explains which neighbors remain
+hidden and asks you to hide a shown neighborhood before expanding another.
+All node-specific expansions and the current selection/focus clear when the
 detail slider changes, so each hop level starts as an unfocused hierarchy
-projection. Clicking anywhere clearly to either side of the slider thumb moves
+projection while independent query and path highlights remain visible.
+Clicking anywhere clearly to either side of the slider thumb moves
 to another hop even when the browser would otherwise round back to the current
 step; thumb dragging and arrow keys continue to work normally. Relationship
 labels stay out of the overview until an entity is selected, which labels its

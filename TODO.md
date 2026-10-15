@@ -27,8 +27,9 @@ The current RDF export is inline in `ImportExportModal.tsx` and there is no RDF
 - [x] Add graduated graph rendering: complete small views, reduced-noise dense
   views, and searchable semantic hierarchy overviews with anchored,
   crossing-aware neighbor expansion, contextual relationship labels, and
-  reversible node-specific expansions plus click-, drag-, touch-, and
-  keyboard-friendly detail changes that clear selection focus
+  monotonic, capacity-aware reversible node-specific expansions plus click-,
+  drag-, touch-, and keyboard-friendly detail changes that clear selection
+  focus while preserving independent highlights
 - [x] Round-trip fidelity: `parse(serialize(ontology))` must produce an
   equivalent ontology
 

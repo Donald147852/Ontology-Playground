@@ -1,11 +1,77 @@
 import type {
   ComponentProps,
+  CSSProperties,
   PointerEvent,
 } from 'react';
-import { useEffect, useRef } from 'react';
+import {
+  useEffect,
+  useInsertionEffect,
+  useRef,
+} from 'react';
 
 const THUMB_SIZE = 28;
 const THUMB_RADIUS = THUMB_SIZE / 2;
+const STYLE_ELEMENT_ID = 'semantic-depth-slider-styles';
+const SLIDER_STYLES = `
+.semantic-depth-slider {
+  height: 44px;
+  padding: 0;
+  color: #0078d4;
+  background: transparent;
+  cursor: pointer;
+  appearance: none;
+}
+.semantic-depth-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  background: rgb(128 128 128 / 55%);
+  border-radius: 999px;
+}
+.semantic-depth-slider::-webkit-slider-thumb {
+  width: var(--semantic-depth-thumb-size);
+  height: var(--semantic-depth-thumb-size);
+  margin-top: calc((4px - var(--semantic-depth-thumb-size)) / 2);
+  box-sizing: border-box;
+  background: currentColor;
+  border: 2px solid Canvas;
+  border-radius: 50%;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 35%);
+  appearance: none;
+}
+.semantic-depth-slider::-moz-range-track {
+  height: 4px;
+  background: rgb(128 128 128 / 55%);
+  border-radius: 999px;
+}
+.semantic-depth-slider::-moz-range-thumb {
+  width: var(--semantic-depth-thumb-size);
+  height: var(--semantic-depth-thumb-size);
+  box-sizing: border-box;
+  background: currentColor;
+  border: 2px solid Canvas;
+  border-radius: 50%;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 35%);
+}
+.semantic-depth-slider:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+.semantic-depth-slider:disabled {
+  cursor: not-allowed;
+}
+`;
+
+function ensureSliderStyles(): void {
+  if (
+    typeof document === 'undefined'
+    || document.getElementById(STYLE_ELEMENT_ID)
+  ) {
+    return;
+  }
+  const style = document.createElement('style');
+  style.id = STYLE_ELEMENT_ID;
+  style.textContent = SLIDER_STYLES;
+  document.head.append(style);
+}
 
 interface TrackPointerOptions {
   pointerX: number;
@@ -69,10 +135,14 @@ export function SemanticDepthSlider({
   max,
   onDepthChange,
   disabled,
+  className,
+  style,
   ...inputProps
 }: SemanticDepthSliderProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const suppressNextTouchStartRef = useRef(false);
+
+  useInsertionEffect(ensureSliderStyles, []);
 
   useEffect(() => {
     const input = inputRef.current;
@@ -126,10 +196,21 @@ export function SemanticDepthSlider({
       event.preventDefault();
     }
   };
+  const sliderStyle: CSSProperties & {
+    '--semantic-depth-thumb-size': string;
+  } = {
+    ...style,
+    '--semantic-depth-thumb-size': `${THUMB_SIZE}px`,
+  };
 
   return (
     <input
       {...inputProps}
+      className={[
+        'semantic-depth-slider',
+        className,
+      ].filter(Boolean).join(' ')}
+      style={sliderStyle}
       ref={inputRef}
       type="range"
       min={1}

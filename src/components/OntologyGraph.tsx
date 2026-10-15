@@ -1,4 +1,11 @@
-import { useEffect, useRef, useCallback, useMemo, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import cytoscape from 'cytoscape';
 import fcose from 'cytoscape-fcose';
 import type {
@@ -14,6 +21,7 @@ import {
   createGraphView,
   DEFAULT_LARGE_GRAPH_DEPTH,
   graphViewMaxDepth,
+  MAX_RENDERED_NODES,
   type GraphViewMode,
 } from '../lib/graphView';
 import {
@@ -111,6 +119,7 @@ export function OntologyGraph() {
   );
   const [graphZoom, setGraphZoom] = useState(MIN_GRAPH_ZOOM);
   const pendingPositionSnapshotRef = useRef<GraphPositionSnapshot | null>(null);
+  const skipNextProjectionSnapshotRef = useRef(false);
   
   // Helper to safely get cytoscape instance - returns null if destroyed
   const getCy = useCallback(() => {
@@ -141,6 +150,7 @@ export function OntologyGraph() {
     selectEntity,
     selectRelationship,
     clearHighlights,
+    setHighlights,
     activeQuest,
     currentStepIndex,
     advanceQuestStep,
@@ -253,7 +263,8 @@ export function OntologyGraph() {
     return createGraphView(currentOntology, {
       search: largeSearch,
       depth: largeDepth,
-      expandedNodeIds: [...expandedNodeIds, ...revealEntityIds],
+      expandedNodeIds,
+      priorityEntityIds: revealEntityIds,
       priorityRelationshipIds: revealRelationshipIds,
     });
   }, [
@@ -284,11 +295,13 @@ export function OntologyGraph() {
       hiddenNeighborCount:
         graphView.hiddenNeighborCounts.get(entity.id) ?? 0,
       isExpanded: expandedNodeIds.has(entity.id),
+      canExpand: graphView.visibleNodeCount < MAX_RENDERED_NODES,
     };
   }, [
     expandedNodeIds,
     graphView.entities,
     graphView.hiddenNeighborCounts,
+    graphView.visibleNodeCount,
     selectedEntityId,
   ]);
   const neighborActionPosition = useGraphNodeActionPosition(
@@ -296,7 +309,8 @@ export function OntologyGraph() {
     selectedOverviewEntity?.id ?? null,
     isBoundedView
       && (selectedOverviewEntity?.hiddenNeighborCount ?? 0) > 0
-      && !selectedOverviewEntity?.isExpanded,
+      && !selectedOverviewEntity?.isExpanded
+      && selectedOverviewEntity?.canExpand === true,
   );
   const graphRootIds = useMemo(() => {
     const visibleIds = new Set(graphView.entities.map((entity) => entity.id));
@@ -305,10 +319,37 @@ export function OntologyGraph() {
     return graphView.entities[0] ? [graphView.entities[0].id] : [];
   }, [graphView.entities, graphView.rootIds]);
   const graphOntologyRef = useRef(currentOntology);
+  const previousProjectionRef = useRef({
+    ontology: currentOntology,
+    graphView,
+  });
+
+  useLayoutEffect(() => {
+    const previous = previousProjectionRef.current;
+    if (
+      previous.ontology === currentOntology
+      && previous.graphView !== graphView
+      && previous.graphView.mode === 'bounded'
+      && graphView.mode === 'bounded'
+    ) {
+      if (skipNextProjectionSnapshotRef.current) {
+        skipNextProjectionSnapshotRef.current = false;
+      } else if (!pendingPositionSnapshotRef.current) {
+        preserveCurrentGraphPosition();
+      }
+    } else {
+      skipNextProjectionSnapshotRef.current = false;
+    }
+    previousProjectionRef.current = {
+      ontology: currentOntology,
+      graphView,
+    };
+  }, [currentOntology, graphView, preserveCurrentGraphPosition]);
 
   useEffect(() => {
     if (graphOntologyRef.current === currentOntology) return;
     graphOntologyRef.current = currentOntology;
+    skipNextProjectionSnapshotRef.current = true;
     setLargeSearchInput('');
     setLargeSearch('');
     setLargeDepth(DEFAULT_LARGE_GRAPH_DEPTH);
@@ -824,6 +865,7 @@ export function OntologyGraph() {
 
   const handleLargeSearch = () => {
     pendingPositionSnapshotRef.current = null;
+    skipNextProjectionSnapshotRef.current = true;
     setLargeSearch(largeSearchInput.trim());
     setExpandedNodeIds(new Set());
     selectEntity(null);
@@ -833,6 +875,7 @@ export function OntologyGraph() {
 
   const handleShowOverview = () => {
     pendingPositionSnapshotRef.current = null;
+    skipNextProjectionSnapshotRef.current = true;
     setLargeSearchInput('');
     setLargeSearch('');
     setLargeDepth(DEFAULT_LARGE_GRAPH_DEPTH);
@@ -863,32 +906,21 @@ export function OntologyGraph() {
     }
   };
 
-  const clearHighlightsOutsideView = (
-    nextView: ReturnType<typeof createGraphView>,
-  ) => {
-    const nextEntityIds = new Set(
-      nextView.entities.map(({ id }) => id),
-    );
-    const nextRelationshipIds = new Set(
-      nextView.relationships.map(({ id }) => id),
-    );
-    if (
-      highlightedEntities.some((id) => !nextEntityIds.has(id))
-      || highlightedRelationships.some(
-        (id) => !nextRelationshipIds.has(id),
-      )
-    ) {
-      clearHighlights();
-    }
-  };
-
   const handleLargeDepthChange = (nextDepth: number) => {
     if (nextDepth === largeDepth) return;
     preserveCurrentGraphPosition();
-    const nextView = createGraphView(currentOntology, {
-      search: largeSearch,
-      depth: nextDepth,
-    });
+    const ontologyEntityIds = new Set(
+      currentOntology.entityTypes.map(({ id }) => id),
+    );
+    const ontologyRelationshipIds = new Set(
+      currentOntology.relationships.map(({ id }) => id),
+    );
+    const retainedHighlightedEntities = highlightedEntities.filter(
+      (id) => ontologyEntityIds.has(id),
+    );
+    const retainedHighlightedRelationships = highlightedRelationships.filter(
+      (id) => ontologyRelationshipIds.has(id),
+    );
 
     setExpandedNodeIds(new Set());
     selectedGraphItemRef.current = {
@@ -899,7 +931,16 @@ export function OntologyGraph() {
     selectEntity(null);
     selectRelationship(null);
     setFocusNodeId(null);
-    clearHighlightsOutsideView(nextView);
+    if (
+      retainedHighlightedEntities.length !== highlightedEntities.length
+      || retainedHighlightedRelationships.length
+        !== highlightedRelationships.length
+    ) {
+      setHighlights(
+        retainedHighlightedEntities,
+        retainedHighlightedRelationships,
+      );
+    }
     setLargeDepth(nextDepth);
   };
 
@@ -908,6 +949,7 @@ export function OntologyGraph() {
       !selectedOverviewEntity
       || selectedOverviewEntity.hiddenNeighborCount === 0
       || selectedOverviewEntity.isExpanded
+      || !selectedOverviewEntity.canExpand
     ) {
       return;
     }

@@ -974,6 +974,7 @@ body {
 .large-graph-options input[type='range'] {
   width: 100%;
   accent-color: var(--ms-blue);
+  color: var(--ms-blue);
   cursor: pointer;
 }
 
@@ -991,8 +992,9 @@ body {
 }
 
 .large-graph-status {
-  min-height: 34px;
+  height: 54px;
   margin-top: 8px;
+  overflow-y: auto;
 }
 
 .large-graph-status p {

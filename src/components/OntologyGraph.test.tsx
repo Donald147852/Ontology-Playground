@@ -26,7 +26,15 @@ const graphMocks = vi.hoisted(() => {
     connectedNodes: chain,
     closedNeighborhood: chain,
     toggleClass: chain,
-    forEach: vi.fn(),
+    forEach: vi.fn((callback: (node: {
+      id: () => string;
+      position: () => { x: number; y: number };
+    }) => void) => {
+      callback({
+        id: () => 'node-0',
+        position: () => ({ x: 100, y: 100 }),
+      });
+    }),
     renderedBoundingBox: vi.fn(() => ({
       x1: 200,
       y1: 200,
@@ -50,6 +58,7 @@ const graphMocks = vi.hoisted(() => {
     getElementById: vi.fn(() => collection),
     layout: vi.fn(() => ({ run: vi.fn() })),
     zoom: vi.fn(() => 1),
+    pan: vi.fn(() => ({ x: 123, y: 77 })),
     width: vi.fn(() => 800),
     height: vi.fn(() => 600),
     center: vi.fn(),
@@ -115,6 +124,39 @@ function createDenseFixture(): Ontology {
     description: 'Dense rendering fixture',
     entityTypes,
     relationships,
+  };
+}
+
+function createWideInheritanceFixture(): Ontology {
+  const root = {
+    id: 'root',
+    name: 'Root',
+    description: 'Wide hierarchy root',
+    properties: [],
+    icon: 'R',
+    color: '#0078D4',
+  };
+  const children = Array.from({ length: 349 }, (_, index) => ({
+    id: `child-${index}`,
+    name: `Child ${index}`,
+    description: `Wide hierarchy child ${index}`,
+    properties: [],
+    icon: 'C',
+    color: '#107C10',
+  }));
+
+  return {
+    name: 'Wide Inheritance Fixture',
+    description: 'A root with more children than the graph budget',
+    entityTypes: [root, ...children],
+    relationships: children.map((child, index) => ({
+      id: `parent-${index}`,
+      name: 'subClassOf',
+      from: child.id,
+      to: root.id,
+      cardinality: 'many-to-one',
+      kind: 'subclass',
+    })),
   };
 }
 
@@ -335,6 +377,39 @@ describe('OntologyGraph adaptive rendering', () => {
     ).toBeDisabled();
   });
 
+  it('keeps partial expansions reversible and explains the view limit', async () => {
+    const ontology = createWideInheritanceFixture();
+    const initialView = createGraphView(ontology);
+    const initialHiddenCount = initialView.hiddenNeighborCounts.get('root');
+    expect(initialHiddenCount).toBe(290);
+
+    useAppStore.getState().loadOntology(ontology);
+    render(<OntologyGraph />);
+    await waitFor(() => {
+      expect(graphMocks.cytoscape).toHaveBeenCalledTimes(1);
+    });
+    act(() => {
+      useAppStore.getState().selectEntity('root');
+    });
+
+    fireEvent.click(screen.getByRole('button', {
+      name: `Show ${initialHiddenCount} hidden neighbors for Root`,
+    }));
+    await waitFor(() => {
+      expect(graphMocks.cytoscape).toHaveBeenCalledTimes(2);
+    });
+
+    expect(screen.getByRole('button', {
+      name: 'Hide shown neighbors for Root',
+    })).toBeEnabled();
+    expect(screen.getByRole('status')).toHaveTextContent(
+      '170 neighbors remain hidden because the 180-entity view limit is full.',
+    );
+    expect(screen.queryByRole('button', {
+      name: /Expand Root to show/,
+    })).not.toBeInTheDocument();
+  });
+
   it('preserves unrelated highlighted reveals when collapsing neighbors', async () => {
     const ontology = createLargeFixture();
     const highlightedEntityId = 'node-349';
@@ -396,10 +471,12 @@ describe('OntologyGraph adaptive rendering', () => {
     );
   });
 
-  it('reapplies retained highlights after a detail change clears focus', async () => {
+  it('retains an off-projection highlight after a detail change clears focus', async () => {
     const ontology = createLargeFixture();
     const initialView = createGraphView(ontology);
-    const highlightedEntityId = initialView.entities[0].id;
+    const highlightedEntityId = 'node-349';
+    expect(initialView.entities.some(({ id }) => id === highlightedEntityId))
+      .toBe(false);
     const boundaryId = [...initialView.hiddenNeighborCounts.keys()][0];
     expect(boundaryId).toBeDefined();
 
@@ -415,13 +492,16 @@ describe('OntologyGraph adaptive rendering', () => {
     await waitFor(() => {
       expect(graphMocks.addClass).toHaveBeenCalledWith('highlighted');
     });
+    const callsBeforeDepthChange = graphMocks.cytoscape.mock.calls.length;
     graphMocks.addClass.mockClear();
 
     fireEvent.change(screen.getByRole('slider', { name: 'Detail: 1 hop' }), {
       target: { value: '2' },
     });
     await waitFor(() => {
-      expect(graphMocks.cytoscape).toHaveBeenCalledTimes(2);
+      expect(graphMocks.cytoscape).toHaveBeenCalledTimes(
+        callsBeforeDepthChange + 1,
+      );
     });
 
     expect(useAppStore.getState().selectedEntityId).toBeNull();
@@ -434,6 +514,39 @@ describe('OntologyGraph adaptive rendering', () => {
     expect(graphMocks.addClass).not.toHaveBeenCalledWith(
       'selected-node-edge',
     );
+    const config = graphMocks.cytoscape.mock.calls.at(-1)?.[0] as CapturedConfig;
+    expect(config.elements).toContainEqual(expect.objectContaining({
+      data: expect.objectContaining({ id: highlightedEntityId }),
+    }));
+  });
+
+  it('preserves positions and viewport when revealing an external selection', async () => {
+    const ontology = createLargeFixture();
+    const hiddenEntityId = 'node-349';
+    expect(createGraphView(ontology).entities.some(
+      ({ id }) => id === hiddenEntityId,
+    )).toBe(false);
+
+    useAppStore.getState().loadOntology(ontology);
+    render(<OntologyGraph />);
+    await waitFor(() => {
+      expect(graphMocks.cytoscape).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      useAppStore.getState().selectEntity(hiddenEntityId);
+    });
+    await waitFor(() => {
+      expect(graphMocks.cytoscape).toHaveBeenCalledTimes(2);
+    });
+
+    const config = graphMocks.cytoscape.mock.calls[1][0] as CapturedConfig;
+    expect(config.layout.name).toBe('preset');
+    expect(config.elements).toContainEqual(expect.objectContaining({
+      data: expect.objectContaining({ id: hiddenEntityId }),
+    }));
+    expect(graphMocks.cy.zoom).toHaveBeenCalledWith(1);
+    expect(graphMocks.cy.pan).toHaveBeenCalledWith({ x: 123, y: 77 });
   });
 
   it('clears a deep selection when lowering hierarchy detail', async () => {
