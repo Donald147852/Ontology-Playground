@@ -83,6 +83,13 @@ arrow keys continue to work normally. Relationship labels stay out of the
 overview until an entity is selected, which labels its visible connections, or
 an individual relationship is hovered or selected.
 
+Massive graph projections are scheduled so users can change the semantic view
+or cancel before layout starts. The Brick reference case is enforced in a real
+Chromium run with one initial layout, no main-thread task or interaction over
+200 ms, at most 60 initially rendered entities, and less than 40 MiB retained
+JavaScript heap after garbage collection. Run `npm run build && npm run
+test:performance` to reproduce the budget report locally.
+
 Turtle input is not currently supported. See the
 [RDF export profiles guide](docs/rdf-export-profiles.md) for the exact
 contracts and limitations.

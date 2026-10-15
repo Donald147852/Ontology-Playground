@@ -30,6 +30,9 @@ The current RDF export is inline in `ImportExportModal.tsx` and there is no RDF
   monotonic, capacity-aware reversible node-specific expansions plus click-,
   drag-, touch-, and keyboard-friendly detail changes that clear selection
   focus while preserving independent highlights
+- [x] Enforce the Brick-scale graph budgets in Chromium: one initial layout,
+  no long task or semantic-view interaction over 200 ms, less than 40 MiB
+  retained heap, and cancelable layout scheduling
 - [x] Keep graph overlays and exports usable: collapse or auto-collapse the
   entity legend, export only the visible graph within safe canvas limits, and
   report PNG generation failures instead of downloading empty files
