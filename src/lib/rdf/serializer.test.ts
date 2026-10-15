@@ -347,6 +347,43 @@ describe('serializeToRDF', () => {
     expect(rdf).not.toContain('<opmeta:');
   });
 
+  it('records source identity as provenance for standards subsets', () => {
+    const ontology: Ontology = {
+      name: 'Imported Standard',
+      description: 'Imported external ontology',
+      entityTypes: [],
+      relationships: [],
+      rdfMetadata: {
+        ontologyIri: 'https://example.org/source',
+        versionIri: 'https://example.org/source/1.0',
+        versionInfo: '1.0',
+        license: 'https://example.org/license',
+        imports: ['https://example.org/imported'],
+        preservedSourceFeatures: ['owlImports'],
+      },
+    };
+
+    const rdf = serializeToRDF(ontology, [], { profile: 'standards' });
+
+    expect(rdf).toContain('xmlns:opmeta=');
+    expect(rdf).toContain(
+      '<owl:Ontology rdf:about="http://example.org/ontology/imported-standard/">',
+    );
+    expect(rdf).toContain(
+      '<dcterms:source rdf:resource="https://example.org/source"/>',
+    );
+    expect(rdf).toContain(
+      '<opmeta:sourceVersionIri rdf:resource="https://example.org/source/1.0"/>',
+    );
+    expect(rdf).toContain(
+      '<opmeta:sourceImport rdf:resource="https://example.org/imported"/>',
+    );
+    expect(rdf).not.toContain(
+      '<owl:Ontology rdf:about="https://example.org/source">',
+    );
+    expect(rdf).not.toContain('<owl:imports');
+  });
+
   it('uses distinct RDF lists when enum property names produce the same slug', () => {
     const ontology: Ontology = {
       name: 'Enum Lists',

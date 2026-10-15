@@ -14,7 +14,13 @@ import {
 
 cytoscape.use(fcose);
 
-export function DesignerPreview() {
+interface DesignerPreviewProps {
+  onOntologyReplaced?: () => void;
+}
+
+export function DesignerPreview({
+  onOntologyReplaced,
+}: DesignerPreviewProps = {}) {
   const [activeTab, setActiveTab] = useState<'graph' | 'rdf'>('graph');
   const { ontology, selectEntity, selectRelationship } = useDesignerStore();
   const theme = useAppStore((s) => s.theme);
@@ -44,7 +50,13 @@ export function DesignerPreview() {
           onSelectRelationship={selectRelationship}
         />
       ) : (
-        <RdfPreview ontology={ontology} onImported={() => setActiveTab('graph')} />
+        <RdfPreview
+          ontology={ontology}
+          onImported={() => {
+            onOntologyReplaced?.();
+            setActiveTab('graph');
+          }}
+        />
       )}
     </div>
   );

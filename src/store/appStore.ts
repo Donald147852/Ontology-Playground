@@ -4,6 +4,7 @@ import { quests as defaultQuests } from '../data/quests';
 import type { Ontology, DataBinding } from '../data/ontology';
 import { cosmicCoffeeOntology, sampleBindings } from '../data/ontology';
 import { generateQuestsForOntology } from '../data/questGenerator';
+import type { CatalogueEntry } from '../types/catalogue';
 
 export type ThemeId = 'dark' | 'light' | 'aurora' | 'crimson';
 
@@ -60,6 +61,7 @@ interface AppState {
   // Ontology State
   currentOntology: Ontology;
   dataBindings: DataBinding[];
+  currentCatalogueEntry: CatalogueEntry | null;
   
   // UI State
   selectedEntityId: string | null;
@@ -83,7 +85,11 @@ interface AppState {
   queryResult: string | null;
   
   // Ontology Actions
-  loadOntology: (ontology: Ontology, bindings?: DataBinding[]) => void;
+  loadOntology: (
+    ontology: Ontology,
+    bindings?: DataBinding[],
+    catalogueEntry?: CatalogueEntry | null,
+  ) => void;
   resetToDefault: () => void;
   exportOntology: () => string;
   
@@ -113,6 +119,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   // Initial Ontology State
   currentOntology: cosmicCoffeeOntology,
   dataBindings: sampleBindings,
+  currentCatalogueEntry: null,
   
   // Initial UI State
   selectedEntityId: null,
@@ -136,12 +143,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   queryResult: null,
   
   // Ontology Actions
-  loadOntology: (ontology, bindings = []) => {
+  loadOntology: (ontology, bindings = [], catalogueEntry = null) => {
     // Generate new quests based on the loaded ontology
     const newQuests = generateQuestsForOntology(ontology);
     set({
       currentOntology: ontology,
       dataBindings: bindings,
+      currentCatalogueEntry: catalogueEntry,
       selectedEntityId: null,
       selectedRelationshipId: null,
       highlightedEntities: [],
@@ -157,6 +165,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   resetToDefault: () => set({
     currentOntology: cosmicCoffeeOntology,
     dataBindings: sampleBindings,
+    currentCatalogueEntry: null,
     selectedEntityId: null,
     selectedRelationshipId: null,
     highlightedEntities: [],
@@ -166,7 +175,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     currentStepIndex: 0,
     completedQuests: []
   }),
-  
+
   exportOntology: () => {
     const { currentOntology, dataBindings } = get();
     return JSON.stringify({ ontology: currentOntology, bindings: dataBindings }, null, 2);

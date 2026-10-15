@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { parseRDF, RDFParseError } from './parser';
 
 const RDF_NS = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#';
@@ -42,6 +42,71 @@ describe('parseRDF', () => {
     </owl:DatatypeProperty>
 
 </rdf:RDF>`;
+
+  it('extracts ontology provenance without dereferencing imports or executing SHACL', () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const rdf = `<?xml version="1.0"?>
+<rdf:RDF xmlns:rdf="${RDF_NS}"
+         xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+         xmlns:owl="http://www.w3.org/2002/07/owl#"
+         xmlns:dcterms="http://purl.org/dc/terms/"
+         xmlns:sh="http://www.w3.org/ns/shacl#">
+  <owl:Ontology rdf:about="https://example.org/ontology">
+    <rdfs:label>Metadata Test</rdfs:label>
+    <owl:versionIRI rdf:resource="https://example.org/ontology/1.0"/>
+    <owl:versionInfo>1.0</owl:versionInfo>
+    <dcterms:license rdf:resource="https://example.org/license"/>
+    <owl:imports rdf:resource="https://example.org/imported"/>
+  </owl:Ontology>
+  <owl:Class rdf:about="https://example.org/ontology/Parent"/>
+  <owl:Class rdf:about="https://example.org/ontology/Child">
+    <rdfs:subClassOf rdf:resource="https://example.org/ontology/Parent"/>
+  </owl:Class>
+  <owl:ObjectProperty rdf:about="https://example.org/ontology/related">
+    <rdfs:domain rdf:resource="https://example.org/ontology/Child"/>
+    <rdfs:range rdf:resource="https://example.org/ontology/Parent"/>
+  </owl:ObjectProperty>
+  <sh:NodeShape rdf:about="https://example.org/ontology/Shape">
+    <sh:targetClass rdf:resource="https://example.org/ontology/Child"/>
+  </sh:NodeShape>
+</rdf:RDF>`;
+
+    const { ontology } = parseRDF(rdf);
+
+    expect(ontology.rdfMetadata).toEqual({
+      ontologyIri: 'https://example.org/ontology',
+      versionIri: 'https://example.org/ontology/1.0',
+      versionInfo: '1.0',
+      license: 'https://example.org/license',
+      imports: ['https://example.org/imported'],
+      preservedSourceFeatures: ['owlImports', 'shacl'],
+    });
+    expect(ontology.relationships).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'subclass' }),
+      expect.objectContaining({ id: 'related' }),
+    ]));
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it('records SHACL source data without an ontology declaration', () => {
+    const rdf = `<?xml version="1.0"?>
+<rdf:RDF xmlns:rdf="${RDF_NS}"
+         xmlns:owl="http://www.w3.org/2002/07/owl#"
+         xmlns:sh="http://www.w3.org/ns/shacl#">
+  <owl:Class rdf:about="https://example.org/Equipment"/>
+  <sh:NodeShape rdf:about="https://example.org/EquipmentShape">
+    <sh:targetClass rdf:resource="https://example.org/Equipment"/>
+  </sh:NodeShape>
+</rdf:RDF>`;
+
+    const { ontology } = parseRDF(rdf);
+
+    expect(ontology.rdfMetadata).toEqual({
+      imports: [],
+      preservedSourceFeatures: ['shacl'],
+    });
+  });
 
   describe('ontology metadata', () => {
     it('extracts ontology name and description', () => {

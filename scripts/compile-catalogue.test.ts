@@ -44,6 +44,10 @@ interface CatalogueTestEntry {
   relationshipCount: number;
   payloadUrl: string;
   payloadHash: string;
+  sourceArtifactUrl: string;
+  sourceArtifactHash: string;
+  sourceArtifactByteLength: number;
+  sourceArtifactMediaType: 'application/rdf+xml';
   license?: string;
   sourceUrl?: string;
   version?: string;
@@ -55,6 +59,13 @@ interface CatalogueTestPayload {
   ontology: {
     entityTypes: { name: string; properties: { isIdentifier?: boolean }[] }[];
     relationships: unknown[];
+    rdfMetadata?: {
+      ontologyIri?: string;
+      versionInfo?: string;
+      license?: string;
+      imports: string[];
+      preservedSourceFeatures: string[];
+    };
   };
   bindings: unknown[];
 }
@@ -200,7 +211,7 @@ describe('catalogue compilation (end-to-end)', () => {
     });
     expect(result).toContain('official/cosmic-coffee');
     expect(result).toContain('official/ecommerce');
-    expect(result).toContain('index entries and');
+    expect(result).toContain('source artifacts');
 
     const output = readCatalogue();
     expect(output.schemaVersion).toBe(2);
@@ -221,6 +232,10 @@ describe('catalogue compilation (end-to-end)', () => {
       expect(entry.relationshipCount).toBeGreaterThanOrEqual(0);
       expect(entry.payloadUrl).toMatch(/^catalogue-payloads\//);
       expect(entry.payloadHash).toMatch(/^sha256:[a-f0-9]{64}$/);
+      expect(entry.sourceArtifactUrl).toMatch(/^catalogue-sources\//);
+      expect(entry.sourceArtifactHash).toMatch(/^sha256:[a-f0-9]{64}$/);
+      expect(entry.sourceArtifactByteLength).toBeGreaterThan(0);
+      expect(entry.sourceArtifactMediaType).toBe('application/rdf+xml');
       expect(entry).not.toHaveProperty('ontology');
       expect(entry).not.toHaveProperty('bindings');
       expect(Array.isArray(entry.tags)).toBe(true);
@@ -241,15 +256,65 @@ describe('catalogue compilation (end-to-end)', () => {
     ) as {
       schemaVersion: number;
       payloads: { payloadUrl: string; payloadHash: string }[];
+      sources: {
+        sourceArtifactUrl: string;
+        sourceArtifactHash: string;
+      }[];
     };
     const manifestEntries = new Map(
       manifest.payloads.map((entry) => [entry.payloadUrl, entry.payloadHash]),
     );
 
     expect(manifest.schemaVersion).toBe(1);
+    const sourceManifestEntries = new Map(
+      manifest.sources.map((entry) => [
+        entry.sourceArtifactUrl,
+        entry.sourceArtifactHash,
+      ]),
+    );
     for (const entry of catalogue.entries) {
       expect(manifestEntries.get(entry.payloadUrl)).toBe(entry.payloadHash);
+      expect(sourceManifestEntries.get(entry.sourceArtifactUrl)).toBe(
+        entry.sourceArtifactHash,
+      );
     }
+  });
+
+  it('publishes the exact Brick source and preserves its RDF metadata', () => {
+    const brick = findEntry('external/brick-schema/brick');
+    const originalPath = join(
+      ROOT,
+      'catalogue',
+      'external',
+      'brick-schema',
+      'brick',
+      'ontology.rdf',
+    );
+    const original = readFileSync(originalPath);
+    const artifact = readFileSync(
+      join(ROOT, 'public', brick.sourceArtifactUrl),
+    );
+
+    expect(artifact.equals(original)).toBe(true);
+    expect(brick.sourceArtifactByteLength).toBe(original.byteLength);
+    expect(brick.sourceArtifactHash).toBe(
+      `sha256:${createHash('sha256').update(original).digest('hex')}`,
+    );
+    expect(artifact.toString('utf-8')).toContain('<sh:rule');
+
+    expect(readPayload(brick).ontology.rdfMetadata).toEqual({
+      ontologyIri: 'https://brickschema.org/schema/1.4/Brick',
+      versionInfo: '1.4.4',
+      license: 'https://github.com/BrickSchema/brick/blob/master/LICENSE',
+      imports: [
+        'http://data.ashrae.org/bacnet/2020',
+        'http://qudt.org/3.1.0/vocab/quantitykind',
+        'http://qudt.org/3.1.0/vocab/unit',
+        'https://brickschema.org/schema/Brick/ref',
+        'https://w3id.org/rec/recimports',
+      ],
+      preservedSourceFeatures: ['owlImports', 'shacl'],
+    });
   });
 
   it('cosmic-coffee entry preserves data bindings', () => {
@@ -290,6 +355,19 @@ describe('catalogue compilation (end-to-end)', () => {
     );
     mkdirSync(dirname(legacyPayloadPath), { recursive: true });
     writeFileSync(legacyPayloadPath, legacyContent);
+    const legacySourceContent = Buffer.from('previous RDF source\n', 'utf-8');
+    const legacySourceHash = createHash('sha256')
+      .update(legacySourceContent)
+      .digest('hex');
+    const legacySourcePath = join(
+      outputRoot,
+      'catalogue-sources',
+      'external',
+      'legacy',
+      `${legacySourceHash}.rdf`,
+    );
+    mkdirSync(dirname(legacySourcePath), { recursive: true });
+    writeFileSync(legacySourcePath, legacySourceContent);
     writeFileSync(outputPath, 'previous index\n');
 
     runCatalogueCompiler(catalogueRoot, outputPath);
@@ -297,6 +375,9 @@ describe('catalogue compilation (end-to-end)', () => {
     expect(readFileSync(legacyPayloadPath, 'utf-8')).toBe(
       legacyContent,
     );
+    expect(readFileSync(legacySourcePath).equals(
+      legacySourceContent,
+    )).toBe(true);
     expect(JSON.parse(readFileSync(
       join(outputRoot, 'catalogue-payloads-manifest.json'),
       'utf-8',
@@ -306,6 +387,11 @@ describe('catalogue compilation (end-to-end)', () => {
         payloadUrl:
           `catalogue-payloads/official/legacy/${legacyHash}.json`,
         payloadHash: `sha256:${legacyHash}`,
+      }],
+      sources: [{
+        sourceArtifactUrl:
+          `catalogue-sources/external/legacy/${legacySourceHash}.rdf`,
+        sourceArtifactHash: `sha256:${legacySourceHash}`,
       }],
     });
     expect(JSON.parse(readFileSync(outputPath, 'utf-8'))).toMatchObject({
@@ -340,6 +426,9 @@ describe('catalogue compilation (end-to-end)', () => {
     expect(saveStep).toBeLessThan(uploadStep);
     expect(
       workflow.match(/^\s+public\/catalogue-payloads$/gm),
+    ).toHaveLength(2);
+    expect(
+      workflow.match(/^\s+public\/catalogue-sources$/gm),
     ).toHaveLength(2);
     expect(
       workflow.match(/key: catalogue-payloads-\$\{\{ github\.run_id \}\}/g),

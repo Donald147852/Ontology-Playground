@@ -81,7 +81,7 @@ function App() {
       loadCatalogueEntry(id)
         .then((entry) => {
           if (!cancelled) {
-            loadOntology(entry.ontology, entry.bindings);
+            loadOntology(entry.ontology, entry.bindings, entry);
           }
         })
         .catch((error) => {

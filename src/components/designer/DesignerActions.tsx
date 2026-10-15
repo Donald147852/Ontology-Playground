@@ -9,11 +9,20 @@ import {
 } from '../../lib/rdf/serializer';
 import { navigate } from '../../lib/router';
 import { SubmitCatalogueModal } from './SubmitCatalogueModal';
+import type { CatalogueEntry } from '../../types/catalogue';
+
+interface DesignerToolbarProps {
+  catalogueEntry?: CatalogueEntry | null;
+  onNewOntology?: () => void;
+}
 
 /**
  * Toolbar buttons — rendered in the designer topbar.
  */
-export function DesignerToolbar() {
+export function DesignerToolbar({
+  catalogueEntry,
+  onNewOntology,
+}: DesignerToolbarProps = {}) {
   const { ontology, validate, resetDraft, undo, redo, _past, _future } = useDesignerStore();
   const loadOntology = useAppStore((s) => s.loadOntology);
   const [showSubmitModal, setShowSubmitModal] = useState(false);
@@ -47,12 +56,13 @@ export function DesignerToolbar() {
   const handleLoadInPlayground = () => {
     const errors = validate();
     if (errors.length > 0) return;
-    loadOntology(ontology, []);
+    loadOntology(ontology, [], catalogueEntry ?? null);
     navigate({ page: 'home' });
   };
 
   const handleNewOntology = () => {
     resetDraft();
+    onNewOntology?.();
   };
 
   const handleSubmitToCatalogue = () => {
@@ -93,8 +103,17 @@ export function DesignerToolbar() {
           <option value="playground">Playground round-trip</option>
           <option value="standards">Standards-oriented OWL + SHACL</option>
         </select>
-        <button className="designer-toolbar-btn" onClick={handleExportRDF} title="Export RDF">
-          <Download size={14} /> Export RDF
+        <button
+          className="designer-toolbar-btn"
+          onClick={handleExportRDF}
+          title={catalogueEntry?.source === 'external'
+            ? 'Export generated RDF subset'
+            : 'Export RDF'}
+        >
+          <Download size={14} />
+          {catalogueEntry?.source === 'external'
+            ? 'Export RDF subset'
+            : 'Export RDF'}
         </button>
         <button className="designer-toolbar-btn" onClick={handleLoadInPlayground} title="Load in Playground">
           <Upload size={14} /> Load in Playground

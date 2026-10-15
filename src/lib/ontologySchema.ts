@@ -1,6 +1,8 @@
 import type {
   EntityType,
   Ontology,
+  OntologyRdfMetadata,
+  PreservedSourceFeature,
   Property,
   Relationship,
   RelationshipAttribute,
@@ -27,6 +29,11 @@ const CARDINALITIES: readonly Relationship['cardinality'][] = [
 const RELATIONSHIP_KINDS: readonly NonNullable<Relationship['kind']>[] = [
   'association',
   'subclass',
+];
+
+const PRESERVED_SOURCE_FEATURES: readonly PreservedSourceFeature[] = [
+  'owlImports',
+  'shacl',
 ];
 
 export interface OntologySchemaIssue {
@@ -89,6 +96,26 @@ function readOptionalString(
     return undefined;
   }
   return value;
+}
+
+function readStringArray(
+  record: Record<string, unknown>,
+  key: string,
+  path: string,
+  issues: OntologySchemaIssue[],
+): string[] {
+  const value = record[key];
+  if (!Array.isArray(value)) {
+    addIssue(issues, path, 'an array');
+    return [];
+  }
+  return value.map((item, index) => {
+    if (typeof item !== 'string') {
+      addIssue(issues, `${path}[${index}]`, 'a string');
+      return '';
+    }
+    return item;
+  });
 }
 
 function isAllowedValue<T extends string>(
@@ -330,6 +357,58 @@ function parseRelationship(
   return relationship;
 }
 
+function parseRdfMetadata(
+  value: unknown,
+  issues: OntologySchemaIssue[],
+): OntologyRdfMetadata | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) {
+    addIssue(issues, 'rdfMetadata', 'an object when provided');
+    return undefined;
+  }
+
+  const preservedSourceFeatures = readStringArray(
+    value,
+    'preservedSourceFeatures',
+    'rdfMetadata.preservedSourceFeatures',
+    issues,
+  ).filter((feature): feature is PreservedSourceFeature => {
+    if (isAllowedValue(feature, PRESERVED_SOURCE_FEATURES)) return true;
+    addIssue(
+      issues,
+      'rdfMetadata.preservedSourceFeatures',
+      `an array containing only: ${PRESERVED_SOURCE_FEATURES.join(', ')}`,
+    );
+    return false;
+  });
+
+  const metadata: OntologyRdfMetadata = {
+    imports: readStringArray(
+      value,
+      'imports',
+      'rdfMetadata.imports',
+      issues,
+    ),
+    preservedSourceFeatures,
+  };
+  const optionalFields = [
+    'ontologyIri',
+    'versionIri',
+    'versionInfo',
+    'license',
+  ] as const;
+  for (const field of optionalFields) {
+    const fieldValue = readOptionalString(
+      value,
+      field,
+      `rdfMetadata.${field}`,
+      issues,
+    );
+    if (fieldValue !== undefined) metadata[field] = fieldValue;
+  }
+  return metadata;
+}
+
 export function parseOntologyValue(
   value: unknown,
   options: OntologySchemaOptions = {},
@@ -372,6 +451,8 @@ export function parseOntologyValue(
     entityTypes,
     relationships,
   };
+  const rdfMetadata = parseRdfMetadata(value.rdfMetadata, issues);
+  if (rdfMetadata) ontology.rdfMetadata = rdfMetadata;
 
   return {
     ontology: issues.length === 0 ? ontology : null,

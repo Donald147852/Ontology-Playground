@@ -31,12 +31,14 @@ the live search bar to filter entities and relationships.
 A curated library of official and community-contributed ontologies spanning six
 domains (Retail, E-Commerce, Healthcare, Finance, Manufacturing, Education).
 Browse by category, search by name or tags, load any ontology with one click,
-and view its RDF source. Catalogue cards preserve and display available
-license, upstream source, and version attribution for external standards and
-adapted community entries. The gallery downloads a lightweight metadata index;
-each versioned ontology payload is fetched and integrity-checked only when
-loaded, embedded, edited, or viewed as RDF. Every ontology has a shareable
-deep link
+and compare its exact reviewed RDF source with Playground-generated RDF.
+Catalogue cards preserve and display available license, upstream source, and
+version attribution for external standards and adapted community entries. The
+gallery downloads a lightweight metadata index; each versioned graph payload
+and original source is published separately at an immutable,
+content-addressed URL and verified by SHA-256 when requested. Original files
+remain byte-for-byte intact, including source-only SHACL rules and unsupported
+triples. Every ontology has a shareable deep link
 (`/#/catalogue/official/cosmic-coffee`).
 
 ### Visual Ontology Designer
@@ -58,7 +60,16 @@ standards profile represents property order, enums, identifiers, relationship
 cardinality, and relationship attributes with interoperable vocabulary instead
 of treating Playground metadata as Fabric vocabulary. Imported class
 hierarchies remain `rdfs:subClassOf` statements on export and are not
-misrepresented as Fabric relationship types.
+misrepresented as Fabric relationship types. Ontology IRI, version IRI,
+version information, license, and `owl:imports` declarations are retained in
+the editable model and recorded as source provenance in generated RDF; imports
+are recorded but never fetched. Generated subsets use their own derived
+ontology identity rather than claiming to be the authoritative upstream
+version.
+For external standards, the graph, Designer, generated exports, and embed RDF
+tab are explicitly labelled as a supported visual subset. Use the catalogue's
+verified original download when source-only semantics such as SHACL rules must
+remain complete.
 
 Graph rendering graduates automatically with ontology size: small ontologies
 remain complete, dense ontologies retain all data with reduced label noise, and
@@ -214,7 +225,9 @@ npm run build
 
 The build pipeline compiles the catalogue, compiles learning content markdown,
 type-checks, bundles the app, and builds the embed widget. Output is in
-`build/`.
+`build/`. The static catalogue output includes `catalogue.json`, lazy graph
+payloads under `catalogue-payloads/`, and byte-preserving originals under
+`catalogue-sources/`.
 
 ### Running Tests
 
@@ -249,7 +262,10 @@ The public Ontology Playground is deployed from `main` to GitHub Pages by
 Fork owners can use GitHub Pages by changing the workflow's repository guard,
 then selecting **GitHub Actions** under **Settings → Pages → Source**. The
 `VITE_BASE_PATH` environment variable is set to `/<repo-name>/` during the
-build so asset paths resolve correctly.
+build so asset paths resolve correctly. Deployments must retain prior
+content-addressed files from both `catalogue-payloads/` and
+`catalogue-sources/` before replacing the catalogue index so open pages with
+an older index keep working.
 
 ### Azure Static Web Apps (optional)
 

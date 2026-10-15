@@ -13,6 +13,10 @@ export interface CatalogueEntry {
   relationshipCount: number;
   payloadUrl: string;
   payloadHash: string;
+  sourceArtifactUrl?: string;
+  sourceArtifactHash?: string;
+  sourceArtifactByteLength?: number;
+  sourceArtifactMediaType?: 'application/rdf+xml';
   license?: string;
   sourceUrl?: string;
   version?: string;
@@ -30,14 +34,29 @@ export interface CataloguePayloadManifestEntry {
   payloadHash: string;
 }
 
+export interface CatalogueSourceManifestEntry {
+  sourceArtifactUrl: string;
+  sourceArtifactHash: string;
+}
+
 export interface CataloguePayloadManifest {
   schemaVersion: 1;
   payloads: CataloguePayloadManifestEntry[];
+  sources: CatalogueSourceManifestEntry[];
 }
 
 export interface LoadedCatalogueEntry extends CatalogueEntry {
   ontology: Ontology;
   bindings: DataBinding[];
+}
+
+export interface LoadedCatalogueSource {
+  id: string;
+  bytes: Uint8Array;
+  text: string;
+  mediaType: 'application/rdf+xml';
+  hash: string;
+  sourceArtifactUrl: string;
 }
 
 export interface Catalogue {

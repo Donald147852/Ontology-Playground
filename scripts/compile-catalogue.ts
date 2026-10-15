@@ -36,6 +36,7 @@ import type {
   CatalogueEntryPayload,
   CataloguePayloadManifest,
   CataloguePayloadManifestEntry,
+  CatalogueSourceManifestEntry,
 } from '../src/types/catalogue.js';
 import {
   CATALOGUE_TIERS,
@@ -55,6 +56,7 @@ const ROOT = join(import.meta.dirname, '..');
 const CATALOGUE_DIR = join(ROOT, 'catalogue');
 const OUTPUT_PATH = join(ROOT, 'public', 'catalogue.json');
 const PAYLOAD_DIR = join(ROOT, 'public', 'catalogue-payloads');
+const SOURCE_DIR = join(ROOT, 'public', 'catalogue-sources');
 const PAYLOAD_MANIFEST_FILENAME = 'catalogue-payloads-manifest.json';
 
 // ------------------------------------------------------------------
@@ -98,14 +100,15 @@ export interface CatalogueCompilerDependencies {
   beforeFileOpen?: (path: string) => void;
 }
 
-interface CompiledPayload {
+interface CompiledAsset {
   relativePath: string;
-  content: string;
+  content: string | Buffer;
 }
 
 interface CompiledCatalogue {
   catalogue: Catalogue;
-  payloads: CompiledPayload[];
+  payloads: CompiledAsset[];
+  sources: CompiledAsset[];
 }
 
 // ------------------------------------------------------------------
@@ -542,7 +545,8 @@ function compileCatalogueArtifacts(
   dependencies: CatalogueCompilerDependencies = {},
 ): CompiledCatalogue {
   const entries: CatalogueEntry[] = [];
-  const payloads: CompiledPayload[] = [];
+  const payloads: CompiledAsset[] = [];
+  const sources: CompiledAsset[] = [];
   let errors = 0;
 
   const discovery = discoverCatalogueSources(catalogueDir, dependencies);
@@ -555,6 +559,7 @@ function compileCatalogueArtifacts(
     let metadata: CatalogueMetadata;
     let ontology: Ontology;
     let bindings: DataBinding[];
+    let rdfBytes: Buffer;
 
     try {
       const rawMetadata = JSON.parse(decodeUtf8(
@@ -574,7 +579,8 @@ function compileCatalogueArtifacts(
       }
       metadata = rawMetadata as CatalogueMetadata;
 
-      const sourceReport = validateRdfSource(source.readRdf());
+      rdfBytes = source.readRdf();
+      const sourceReport = validateRdfSource(rdfBytes);
       errors += printValidationReport(source.rdfPath, sourceReport);
       if (sourceReport.errors.length > 0 || sourceReport.text === undefined) {
         continue;
@@ -621,6 +627,11 @@ function compileCatalogueArtifacts(
       .update(payloadContent)
       .digest('hex');
     const relativePayloadPath = `${source.entryId}/${payloadHash}.json`;
+    const sourceArtifactHash = createHash('sha256')
+      .update(rdfBytes)
+      .digest('hex');
+    const relativeSourcePath =
+      `${source.entryId}/${sourceArtifactHash}.rdf`;
 
     entries.push({
       id: source.entryId,
@@ -635,6 +646,10 @@ function compileCatalogueArtifacts(
       relationshipCount: ontology.relationships.length,
       payloadUrl: `catalogue-payloads/${relativePayloadPath}`,
       payloadHash: `sha256:${payloadHash}`,
+      sourceArtifactUrl: `catalogue-sources/${relativeSourcePath}`,
+      sourceArtifactHash: `sha256:${sourceArtifactHash}`,
+      sourceArtifactByteLength: rdfBytes.byteLength,
+      sourceArtifactMediaType: 'application/rdf+xml',
       license: metadata.license,
       sourceUrl: metadata.sourceUrl,
       version: metadata.version,
@@ -642,6 +657,10 @@ function compileCatalogueArtifacts(
     payloads.push({
       relativePath: relativePayloadPath,
       content: payloadContent,
+    });
+    sources.push({
+      relativePath: relativeSourcePath,
+      content: rdfBytes,
     });
 
     console.log(`✔ ${source.entryId}`);
@@ -659,6 +678,7 @@ function compileCatalogueArtifacts(
       entries,
     },
     payloads,
+    sources,
   };
 }
 
@@ -669,12 +689,14 @@ export function compileCatalogue(
   return compileCatalogueArtifacts(catalogueDir, dependencies).catalogue;
 }
 
-function collectPublishedPayloads(
-  payloadDirectory: string,
-  directory: string = payloadDirectory,
+function collectPublishedAssets(
+  assetDirectory: string,
+  extension: 'json' | 'rdf',
+  assetLabel: 'payload' | 'source',
+  directory: string = assetDirectory,
   prefix = '',
-): CataloguePayloadManifestEntry[] {
-  const payloads: CataloguePayloadManifestEntry[] = [];
+): Array<{ relativePath: string; hash: string }> {
+  const assets: Array<{ relativePath: string; hash: string }> = [];
   const entries = readdirSync(directory, { withFileTypes: true })
     .sort((left, right) => left.name.localeCompare(right.name));
 
@@ -684,40 +706,98 @@ function collectPublishedPayloads(
     if (entry.isDirectory()) {
       if (!/^[a-z0-9][a-z0-9_-]*$/.test(entry.name)) {
         throw new Error(
-          `Unsafe catalogue payload directory: ${relativePath}`,
+          `Unsafe catalogue ${assetLabel} directory: ${relativePath}`,
         );
       }
-      payloads.push(...collectPublishedPayloads(
-        payloadDirectory,
+      assets.push(...collectPublishedAssets(
+        assetDirectory,
+        extension,
+        assetLabel,
         entryPath,
         relativePath,
       ));
       continue;
     }
     if (!entry.isFile()) {
-      throw new Error(`Unsupported catalogue payload path: ${relativePath}`);
+      throw new Error(
+        `Unsupported catalogue ${assetLabel} path: ${relativePath}`,
+      );
     }
 
-    const match = relativePath.match(
-      /^(?:[a-z0-9][a-z0-9_-]*\/)+([a-f0-9]{64})\.json$/,
-    );
+    const match = relativePath.match(new RegExp(
+      `^(?:[a-z0-9][a-z0-9_-]*/)+([a-f0-9]{64})\\.${extension}$`,
+    ));
     if (!match) {
-      throw new Error(`Invalid catalogue payload path: ${relativePath}`);
+      throw new Error(
+        `Invalid catalogue ${assetLabel} path: ${relativePath}`,
+      );
     }
-    const content = readFileSync(entryPath, 'utf-8');
+    const content = readFileSync(entryPath);
     const actualHash = createHash('sha256').update(content).digest('hex');
     if (actualHash !== match[1]) {
       throw new Error(
-        `Catalogue payload hash does not match its path: ${relativePath}`,
+        `Catalogue ${assetLabel} hash does not match its path: ${relativePath}`,
       );
     }
-    payloads.push({
-      payloadUrl: `catalogue-payloads/${relativePath}`,
-      payloadHash: `sha256:${actualHash}`,
+    assets.push({
+      relativePath,
+      hash: actualHash,
     });
   }
 
-  return payloads;
+  return assets;
+}
+
+function collectPublishedPayloads(
+  payloadDirectory: string,
+): CataloguePayloadManifestEntry[] {
+  return collectPublishedAssets(
+    payloadDirectory,
+    'json',
+    'payload',
+  ).map(({ relativePath, hash }) => ({
+    payloadUrl: `catalogue-payloads/${relativePath}`,
+    payloadHash: `sha256:${hash}`,
+  }));
+}
+
+function collectPublishedSources(
+  sourceDirectory: string,
+): CatalogueSourceManifestEntry[] {
+  return collectPublishedAssets(
+    sourceDirectory,
+    'rdf',
+    'source',
+  ).map(({ relativePath, hash }) => ({
+    sourceArtifactUrl: `catalogue-sources/${relativePath}`,
+    sourceArtifactHash: `sha256:${hash}`,
+  }));
+}
+
+function writeCompiledAssets(
+  outputDirectory: string,
+  assets: CompiledAsset[],
+  temporaryPaths: string[],
+): void {
+  mkdirSync(outputDirectory, { recursive: true });
+  for (const asset of assets) {
+    const outputPath = join(outputDirectory, asset.relativePath);
+    mkdirSync(dirname(outputPath), { recursive: true });
+    const expectedContent = typeof asset.content === 'string'
+      ? Buffer.from(asset.content, 'utf-8')
+      : asset.content;
+    if (
+      existsSync(outputPath)
+      && readFileSync(outputPath).equals(expectedContent)
+    ) {
+      continue;
+    }
+
+    const temporaryPath = `${outputPath}.tmp-${process.pid}`;
+    temporaryPaths.push(temporaryPath);
+    writeFileSync(temporaryPath, expectedContent);
+    renameSync(temporaryPath, outputPath);
+  }
 }
 
 export function runCatalogueCompiler(
@@ -725,39 +805,37 @@ export function runCatalogueCompiler(
   outputPath: string = OUTPUT_PATH,
   dependencies: CatalogueCompilerDependencies = {},
 ): Catalogue {
-  const { catalogue, payloads } = compileCatalogueArtifacts(
+  const { catalogue, payloads, sources } = compileCatalogueArtifacts(
     catalogueDir,
     dependencies,
   );
   const payloadDirectory = outputPath === OUTPUT_PATH
     ? PAYLOAD_DIR
     : join(dirname(outputPath), 'catalogue-payloads');
+  const sourceDirectory = outputPath === OUTPUT_PATH
+    ? SOURCE_DIR
+    : join(dirname(outputPath), 'catalogue-sources');
   const manifestPath = join(dirname(outputPath), PAYLOAD_MANIFEST_FILENAME);
   const indexTemporaryPath = `${outputPath}.tmp-${process.pid}`;
   const manifestTemporaryPath = `${manifestPath}.tmp-${process.pid}`;
-  const temporaryPayloadPaths: string[] = [];
+  const temporaryAssetPaths: string[] = [];
 
   try {
-    mkdirSync(payloadDirectory, { recursive: true });
-    for (const payload of payloads) {
-      const payloadPath = join(payloadDirectory, payload.relativePath);
-      mkdirSync(dirname(payloadPath), { recursive: true });
-      if (
-        existsSync(payloadPath)
-        && readFileSync(payloadPath, 'utf-8') === payload.content
-      ) {
-        continue;
-      }
-
-      const temporaryPath = `${payloadPath}.tmp-${process.pid}`;
-      temporaryPayloadPaths.push(temporaryPath);
-      writeFileSync(temporaryPath, payload.content, 'utf-8');
-      renameSync(temporaryPath, payloadPath);
-    }
+    writeCompiledAssets(
+      payloadDirectory,
+      payloads,
+      temporaryAssetPaths,
+    );
+    writeCompiledAssets(
+      sourceDirectory,
+      sources,
+      temporaryAssetPaths,
+    );
 
     const manifest: CataloguePayloadManifest = {
       schemaVersion: 1,
       payloads: collectPublishedPayloads(payloadDirectory),
+      sources: collectPublishedSources(sourceDirectory),
     };
     rmSync(manifestTemporaryPath, { force: true });
     writeFileSync(
@@ -777,14 +855,14 @@ export function runCatalogueCompiler(
   } catch (error) {
     rmSync(indexTemporaryPath, { force: true });
     rmSync(manifestTemporaryPath, { force: true });
-    for (const temporaryPath of temporaryPayloadPaths) {
+    for (const temporaryPath of temporaryAssetPaths) {
       rmSync(temporaryPath, { force: true });
     }
     throw error;
   }
 
   console.log(
-    `\n✔ Wrote ${catalogue.count} index entries and ${payloads.length} payloads`,
+    `\n✔ Wrote ${catalogue.count} index entries, ${payloads.length} payloads, and ${sources.length} source artifacts`,
   );
   return catalogue;
 }

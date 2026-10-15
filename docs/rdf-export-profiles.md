@@ -34,8 +34,10 @@ than as a standards-neutral interchange contract.
 ## Standards-oriented OWL + SHACL
 
 The **standards-oriented OWL + SHACL** profile omits Playground-only
-presentation and binding metadata. It represents the supported domain model
-with standard vocabularies:
+presentation and binding metadata. It retains only the minimal Playground
+annotations needed to identify a generated subset and record source
+provenance. It represents the supported domain model with standard
+vocabularies:
 
 | Model feature | Representation |
 | --- | --- |
@@ -47,6 +49,7 @@ with standard vocabularies:
 | Identifier properties | `owl:hasKey`, plus `sh:minCount 1` and `sh:maxCount 1` |
 | Relationship cardinality | Forward and inverse SHACL property shapes using `sh:maxCount` |
 | Relationship attributes | An association class derived from `rdf:Statement`, with typed properties |
+| Source provenance | `dcterms:source` plus explicit Playground source-version and source-import annotations |
 
 Relationship participation is treated as optional because the visual model does
 not currently store optionality. The exporter therefore does not invent a
@@ -74,10 +77,17 @@ also accepts equivalent RDF/XML that references RDF lists and inverse SHACL
 paths through blank nodes.
 
 Both profiles mint a generated base IRI from the ontology name and retain the
-ontology label and description. The editable model does not currently retain
-an imported ontology IRI, version, license statement, `owl:imports`, or
-unsupported source triples. SHACL constraints are parsed only for the supported
-visual model; the Playground does not execute a SHACL validation engine.
+ontology label and description. When RDF was imported from a catalogue source,
+the editable model also retains its ontology IRI, version IRI and label,
+license, and import IRIs. Generated RDF records those values as provenance
+rather than declaring that the reduced graph is the authoritative upstream
+ontology or version. In particular, recorded source imports are not emitted as
+active `owl:imports` on the generated subset.
+
+Unsupported source triples remain only in the catalogue's byte-preserving
+original artifact. Source SHACL is inert: it is not copied into a generated
+profile unless represented by supported visual-model constraints, and the
+Playground does not execute a SHACL validation engine.
 
 The standards-oriented profile intentionally omits icons, colors, units, data
 bindings, and other editor-only values that have no selected standards mapping.
