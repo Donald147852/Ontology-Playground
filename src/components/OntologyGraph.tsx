@@ -82,7 +82,7 @@ export interface OntologyGraphMetrics {
 const MIN_GRAPH_ZOOM = 0.3;
 const MAX_GRAPH_ZOOM = 3;
 const GRAPH_ZOOM_STEP = 0.3;
-const DEFAULT_BOUNDED_LAYOUT_DELAY_MS = 50;
+const DEFAULT_BOUNDED_LAYOUT_DELAY_MS = 0;
 const DEFAULT_BOUNDED_LAYOUT_ANIMATION_MS = 25;
 const EMPTY_EXPANDED_NODE_IDS = new Set<string>();
 
