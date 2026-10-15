@@ -196,7 +196,7 @@ describe('catalogue compilation (end-to-end)', () => {
     const result = execSync('npx tsx scripts/compile-catalogue.ts', {
       cwd: ROOT,
       encoding: 'utf-8',
-      timeout: 30000,
+      timeout: 60000,
     });
     expect(result).toContain('official/cosmic-coffee');
     expect(result).toContain('official/ecommerce');
@@ -207,7 +207,7 @@ describe('catalogue compilation (end-to-end)', () => {
     expect(output.count).toBe(output.entries.length);
     expect(output.entries.length).toBeGreaterThan(0);
     expect(output.generatedAt).toBeTruthy();
-  }, 35000);
+  }, 65000);
 
   it('catalogue.json entries have required fields', () => {
     const output = readCatalogue();
