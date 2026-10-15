@@ -205,9 +205,6 @@ test('direct Brick link stays within the rendering budgets', async ({
     'searchbox',
     { name: 'Jump to an entity' },
   ).fill('Zone');
-  await page.evaluate(() => {
-    performance.mark('large-graph-interaction-start');
-  });
   await page.getByRole('button', { name: 'Find', exact: true }).click();
   await page.waitForFunction(() => {
     const metrics = (window as PerformanceWindow)
@@ -217,11 +214,11 @@ test('direct Brick link stays within the rendering budgets', async ({
       && document.querySelector('.large-graph-result')
         ?.textContent?.includes('matching');
   });
-  const interactionMs = await page.evaluate(() => (
-    performance.now()
-      - performance.getEntriesByName('large-graph-interaction-start')
-        .at(-1)!.startTime
-  ));
+  const interactionMetrics = await readMetrics(page);
+  const interactionMs = interactionMetrics.lastInteractionDurationMs;
+  if (interactionMs === null) {
+    throw new Error('Semantic-view interaction timing was not recorded');
+  }
 
   await attachReport(testInfo, {
     flow: 'direct',

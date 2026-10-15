@@ -74,6 +74,7 @@ export interface OntologyGraphMetrics {
   renderedEdgeCount: number;
   layoutCount: number;
   lastLayoutDurationMs: number;
+  lastInteractionDurationMs: number | null;
   maxLongTaskDurationMs: number;
   retainedHeapBytes: number | null;
   status: LayoutStatus;
@@ -190,6 +191,7 @@ export function OntologyGraph() {
   > | null>(null);
   const activeLayoutRef = useRef<Layouts | null>(null);
   const layoutCancellationRequestedRef = useRef(false);
+  const viewInteractionStartedAtRef = useRef<number | null>(null);
   const metricsOntologyRef = useRef<unknown>(null);
   
   // Helper to safely get cytoscape instance - returns null if destroyed
@@ -447,6 +449,7 @@ export function OntologyGraph() {
     setLargeSearch('');
     setLargeDepth(DEFAULT_LARGE_GRAPH_DEPTH);
     setExpandedNodeIds(EMPTY_EXPANDED_NODE_IDS);
+    viewInteractionStartedAtRef.current = null;
     layoutCancellationRequestedRef.current = false;
     setLayoutPaused(false);
     setLayoutError(null);
@@ -542,6 +545,7 @@ export function OntologyGraph() {
       renderedEdgeCount: initialGraphView.visibleEdgeCount,
       layoutCount: 0,
       lastLayoutDurationMs: 0,
+      lastInteractionDurationMs: null,
       maxLongTaskDurationMs:
         window.__ONTOLOGY_GRAPH_PAGE_MAX_LONG_TASK_MS__ ?? 0,
       retainedHeapBytes: retainedHeapBytes(),
@@ -943,6 +947,16 @@ export function OntologyGraph() {
         metrics.lastLayoutDurationMs = performance.now() - layoutStartedAt;
         metrics.retainedHeapBytes = retainedHeapBytes();
       }
+      if (viewInteractionStartedAtRef.current !== null) {
+        if (
+          metrics
+          && metricsOntologyRef.current === currentOntology
+        ) {
+          metrics.lastInteractionDurationMs =
+            performance.now() - viewInteractionStartedAtRef.current;
+        }
+        viewInteractionStartedAtRef.current = null;
+      }
       updateLayoutStatus('idle');
       retainedHeapTimer = window.setTimeout(() => {
         const settledMetrics = window.__ONTOLOGY_GRAPH_METRICS__;
@@ -1191,6 +1205,7 @@ export function OntologyGraph() {
   };
 
   const handleLargeSearch = () => {
+    viewInteractionStartedAtRef.current = performance.now();
     pendingPositionSnapshotRef.current = null;
     skipNextProjectionSnapshotRef.current = true;
     setLargeSearch(largeSearchInput.trim());
@@ -1201,6 +1216,7 @@ export function OntologyGraph() {
   };
 
   const handleShowOverview = () => {
+    viewInteractionStartedAtRef.current = performance.now();
     pendingPositionSnapshotRef.current = null;
     skipNextProjectionSnapshotRef.current = true;
     setLargeSearchInput('');
@@ -1235,6 +1251,7 @@ export function OntologyGraph() {
 
   const handleLargeDepthChange = (nextDepth: number) => {
     if (nextDepth === largeDepth) return;
+    viewInteractionStartedAtRef.current = performance.now();
     preserveCurrentGraphPosition();
     const ontologyEntityIds = new Set(
       currentOntology.entityTypes.map(({ id }) => id),
@@ -1281,6 +1298,7 @@ export function OntologyGraph() {
       return;
     }
 
+    viewInteractionStartedAtRef.current = performance.now();
     preserveCurrentGraphPosition(selectedOverviewEntity.id);
     setExpandedNodeIds((current) => {
       if (current.has(selectedOverviewEntity.id)) return current;
@@ -1291,6 +1309,7 @@ export function OntologyGraph() {
   const handleCollapseSelectedEntity = () => {
     if (!selectedOverviewEntity?.isExpanded) return;
 
+    viewInteractionStartedAtRef.current = performance.now();
     preserveCurrentGraphPosition(selectedOverviewEntity.id);
     const nextExpandedNodeIds = new Set(expandedNodeIds);
     nextExpandedNodeIds.delete(selectedOverviewEntity.id);
