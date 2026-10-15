@@ -19,7 +19,10 @@ Replace `YOUR_SITE_URL` with the URL where your Ontology Playground app is deplo
 That's it! The widget loads the lightweight catalogue index, fetches only the
 selected ontology's content-addressed payload, verifies its hash, and renders
 an interactive graph. Concurrent widgets for the same entry share the cached
-request and parsed payload.
+request and parsed payload. Its RDF tab is generated from that visual model;
+for external standards it is labelled as a subset and does not reproduce
+source-only SHACL rules or unsupported triples. The widget never fetches
+`owl:imports`.
 
 ## Available Ontologies
 
@@ -123,15 +126,15 @@ Encode your ontology JSON as base64 and pass it directly:
 | `data-catalogue-id` | One of three sources | — | Ontology ID from the catalogue |
 | `data-ontology-url` | One of three sources | — | URL to an RDF/XML or JSON ontology file |
 | `data-ontology-inline` | One of three sources | — | Base64-encoded ontology JSON |
-| `data-catalogue-base-url` | No | Current page origin | Base URL where `catalogue.json` and `catalogue-payloads/` are hosted |
+| `data-catalogue-base-url` | No | Current page origin | Base URL where `catalogue.json`, `catalogue-payloads/`, and the gallery's `catalogue-sources/` are hosted |
 | `data-theme` | No | `dark` | Color theme: `dark` or `light` |
 | `data-height` | No | `500px` | Widget height (any CSS value) |
 
 When publishing a new self-hosted catalogue version, retain the existing
-`catalogue-payloads/` files and add the newly generated payloads before
-replacing `catalogue.json`. Payload files are immutable and content-addressed;
-keeping prior hashes prevents open pages with an older index from breaking
-during a deployment.
+`catalogue-payloads/` and `catalogue-sources/` files and add the newly
+generated artifacts before replacing `catalogue.json`. Both file sets are
+immutable and content-addressed; keeping prior hashes prevents open pages with
+an older index from breaking during a deployment.
 
 ## Dynamic Mounting
 
@@ -155,7 +158,8 @@ This scans the DOM for new `.ontology-embed` elements and mounts widgets on any 
   off-thumb track clicks, dragging, touch, and arrow-key adjustments are all
   supported
 - **Inspector overlay** — click any entity or relationship to see its properties
-- **RDF Source tab** — view the generated RDF/XML with a Copy button
+- **Generated RDF tab** — view and copy RDF/XML serialized from the supported
+  visual model; external catalogue entries disclose when this is a subset
 - **Dark & light themes** — match your site's design
 - **Self-contained** — single JS file, no external CSS needed
 

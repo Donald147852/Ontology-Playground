@@ -76,6 +76,11 @@ The current RDF export is inline in `ImportExportModal.tsx` and there is no RDF
 - [x] Parse the generated standard constraints so statement reordering does not
   break round trips
 - [x] Document what each profile preserves and omits
+- [x] Preserve ontology IRI, version, license, imports, subclass edges, and
+  object-property semantics without dereferencing external resources
+- [x] Keep exact external source bytes available separately from generated RDF
+  and disclose visual-model limitations in gallery, Designer, export, and embed
+  surfaces
 
 ---
 
@@ -156,6 +161,10 @@ into a static JSON file.
   `"build": "npm run catalogue:build && tsc -b && vite build"`
 - [x] On build failure (invalid RDF, missing metadata), fail loudly with a
   helpful error message
+- [x] Publish every reviewed RDF file as a SHA-256-addressed, byte-preserving
+  source artifact alongside the lazy graph payload
+- [x] Retain historical graph payloads and source artifacts across static
+  deployments
 
 ### 3.3 Community contribution workflow (Microsoft OSS conventions)
 - [x] Add `LICENSE` file — **MIT License** (standard for Microsoft OSS projects)
