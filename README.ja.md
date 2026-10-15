@@ -191,31 +191,31 @@ npm run test:watch  # watch mode
 
 ## デプロイ
 
-### Azure Static Web Apps（主要）
+### GitHub Pages（公式）
 
-リポジトリには、`main` へのプッシュごとに Azure SWA へデプロイする
-GitHub Actions ワークフローが含まれています。
+公開されている Ontology Playground は、
+`.github/workflows/deploy-ghpages.yml` により `main` から GitHub Pages へ
+デプロイされます。このワークフローは静的な `build/` 出力のみを公開し、
+オプションの `api/` パッケージはデプロイしません。
+
+フォークの所有者は、ワークフローのリポジトリ ガードを変更し、
+**Settings → Pages → Source** で **GitHub Actions** を選択することで
+GitHub Pages を利用できます。
+
+### Azure Static Web Apps（オプション）
+
+フォークの所有者は、静的フロントエンドを Azure Static Web Apps で
+ホストすることもできます。
 
 1. Azure portal で静的 Web アプリを作成します
-2. GitHub リポジトリを接続します
-3. デプロイ トークンをコピーし、GitHub シークレットとして追加します
+2. フォークを接続します
+3. デプロイ トークンを GitHub シークレットとして追加します
    `AZURE_STATIC_WEB_APPS_API_TOKEN_GREEN_PLANT_0BB1D2910`
-4. `main` にプッシュします。
-   `.github/workflows/azure-static-web-apps-green-plant-0bb1d2910.yml` のワークフローが
-   残りを処理します
-5. プルリクエストには PR プレビュー環境が自動的に作成されます
+4. `main` にプッシュします
 
-### GitHub Pages（フォーク向け）
-
-別のワークフローが GitHub Pages へデプロイするため、フォークに最適です。
-
-1. このリポジトリをフォークします
-2. **Settings → Pages → Source** を開き、**GitHub Actions** を選択します
-3. `main` にプッシュします。`.github/workflows/deploy-ghpages.yml` のワークフローが
-   ビルドし、`https://<username>.github.io/<repo-name>/` へデプロイします
-
-GitHub Pages のビルド中、`VITE_BASE_PATH` 環境変数は自動的に
-`/<repo-name>/` に設定され、アセットのパスが正しく解決されます。
+提供される Azure Static Web Apps ワークフローも静的アセットのみを公開し、
+マネージド Azure Functions はデプロイしません。Azure Functions API は
+オプションであり、必要な利用者が独自にデプロイします。
 
 ### 環境変数
 
@@ -226,6 +226,7 @@ GitHub Pages のビルド中、`VITE_BASE_PATH` 環境変数は自動的に
 | `VITE_BASE_PATH` | `/` | アプリのベースパス（GitHub Pages では自動設定） |
 | `VITE_GITHUB_CLIENT_ID` | *（空）* | ワンクリックのカタログ PR 用 GitHub OAuth App クライアント ID（[設定ガイド](docs/github-oauth-setup.md)） |
 | `VITE_GITHUB_OAUTH_BASE` | *（空）* | GitHub Pages デプロイ用の外部 OAuth プロキシ URL（例：Cloudflare Worker URL） |
+| `VITE_API_BASE` | `/api` | 個別にデプロイした API ルートのベース URL（例：`https://example.azurewebsites.net/api`） |
 
 ## プロジェクト構成
 

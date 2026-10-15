@@ -317,7 +317,10 @@ How do these concepts connect?
 ### Step 5: Create in the designer or write RDF
 
 **Option A:** Open the Ontology Designer (`/#/designer`), add the entities and
-relationships visually, then export as RDF.
+relationships visually, then export as RDF. Use **Playground round-trip** when
+the file needs to remain fully editable in the Playground, or
+**Standards-oriented OWL + SHACL** for standards-based RDF tooling. See
+[RDF export profiles](./rdf-export-profiles.md) for the differences.
 
 **Option B:** Write the RDF directly following the pattern in any official
 ontology (e.g., `catalogue/official/cosmic-coffee/cosmic-coffee.rdf`).

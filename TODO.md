@@ -59,13 +59,26 @@ The current RDF export is inline in `ImportExportModal.tsx` and there is no RDF
 - [x] Add `"test": "vitest run"` and `"test:watch": "vitest"` to
   `package.json` scripts
 
+### 1.4 Standards-oriented generated exports
+- [x] Keep the lossless Playground round-trip profile as a distinct export
+  contract
+- [x] Declare Playground metadata in a stable project namespace rather than
+  the generated domain namespace
+- [x] Add an OWL + SHACL profile for property order, enums, identifiers, and
+  relationship cardinality
+- [x] Model relationship attributes as RDF 1.1-compatible association classes
+- [x] Parse the generated standard constraints so statement reordering does not
+  break round trips
+- [x] Document what each profile preserves and omits
+
 ---
 
 ## 2. Fully static site (Azure Static Web Apps + GitHub Pages)
 
 The app currently proxies `/api` to an Azure Functions backend. The site must
-work as a pure static build with zero server-side dependencies. Azure SWA is
-the **primary** deployment target; GitHub Pages support is for forks.
+work as a pure static build with zero server-side dependencies. GitHub Pages is
+the official public deployment target; Azure SWA remains an optional static
+hosting choice for forks and review previews.
 
 ### 2.1 Remove runtime API dependency
 - [x] The Azure OpenAI feature is already behind `VITE_ENABLE_AI_BUILDER` —
@@ -75,24 +88,25 @@ the **primary** deployment target; GitHub Pages support is for forks.
 - [x] Guard the Vite dev proxy (`server.proxy`) behind `VITE_ENABLE_AI_BUILDER`
   so it doesn't confuse static deployments
 
-### 2.2 Azure Static Web Apps (primary)
+### 2.2 Azure Static Web Apps (optional)
 The existing workflow
 `.github/workflows/azure-static-web-apps-green-plant-0bb1d2910.yml` handles
 build + deploy. Adapt it for the new build pipeline:
 - [x] Add `npm run catalogue:build` step before the SWA deploy action (once
   §3.2 is done)
-- [x] Verify `staticwebapp.config.json` is correct for the static-only build
-  (remove `api_location` if the API feature flag is off)
+- [x] Keep every supplied SWA upload static-only by omitting `api_location`;
+  users who need the optional Functions API deploy it separately
 - [x] Ensure the `output_location: "build"` matches Vite's `outDir`
 - [x] Keep the existing PR preview environment support (staging URLs on PRs)
 
-### 2.3 GitHub Pages (for forks)
+### 2.3 GitHub Pages (official)
 - [x] Add a **separate** GitHub Actions workflow
   `.github/workflows/deploy-ghpages.yml`:
   - Trigger on push to `main`
   - `npm ci && npm run catalogue:build && npm run build`
   - Deploy `build/` via `actions/deploy-pages`
-  - Disabled by default (forks enable it by setting the Pages source)
+  - Repository-scoped to deploy `microsoft/Ontology-Playground`; forks can
+    adapt the guard and select GitHub Actions as their Pages source
 - [x] Set `base` in `vite.config.ts` dynamically from an env var
   (`VITE_BASE_PATH`) so it works at `/` (Azure SWA) and
   `/<repo-name>/` (GitHub Pages)
@@ -341,7 +355,7 @@ one-click PR flow.
 - [x] "Preview RDF" tab shows the live RDF output as you design
 - [x] Validate the ontology before export:
   - All relationships reference existing entity IDs
-  - No duplicate entity/relationship IDs
+  - No duplicate graph element IDs, including across entities and relationships
   - At least one entity type exists
   - Each entity has at least one identifier property
 

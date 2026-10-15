@@ -2,7 +2,14 @@ import { useState, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { X, Sparkles, Send, Loader2, Check, AlertCircle, Edit3, Mic, MicOff } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
+import { validateOntology } from '../store/designerStore';
+import type { ValidationError } from '../store/designerStore';
 import type { Ontology } from '../data/ontology';
+import { buildApiUrl } from '../lib/api';
+import {
+  parseOntologyValue,
+  type OntologySchemaIssue,
+} from '../lib/ontologySchema';
 
 // Web Speech API types
 interface SpeechRecognitionEvent extends Event {
@@ -52,6 +59,49 @@ interface NLBuilderModalProps {
 }
 
 type Step = 'input' | 'loading' | 'preview' | 'error';
+
+const MAX_DISPLAYED_VALIDATION_ERRORS = 5;
+const DEFAULT_ENTITY_COLORS = [
+  '#0078D4',
+  '#107C10',
+  '#5C2D91',
+  '#FFB900',
+  '#D83B01',
+  '#00A9E0',
+  '#8764B8',
+  '#00B294',
+];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function formatErrors(
+  prefix: string,
+  errors: readonly (ValidationError | OntologySchemaIssue)[],
+): string {
+  const shown = errors.slice(0, MAX_DISPLAYED_VALIDATION_ERRORS).map((e) => `• ${e.message}`);
+  const remaining = errors.length - shown.length;
+  const suffix = remaining > 0 ? `\n…and ${remaining} more` : '';
+  return `${prefix}:\n${shown.join('\n')}${suffix}`;
+}
+
+function parseBuilderOntology(value: unknown): Ontology {
+  const result = parseOntologyValue(value, {
+    defaultEntityColors: DEFAULT_ENTITY_COLORS,
+  });
+  if (!result.ontology) {
+    throw new Error(formatErrors(
+      'Ontology structure is invalid',
+      result.issues,
+    ));
+  }
+  return result.ontology;
+}
+
+function formatValidationErrors(errors: ValidationError[]): string {
+  return formatErrors('Generated ontology failed validation', errors);
+}
 
 export function NLBuilderModal({ onClose }: NLBuilderModalProps) {
   const [description, setDescription] = useState('');
@@ -193,26 +243,32 @@ export function NLBuilderModal({ onClose }: NLBuilderModalProps) {
     setError(null);
     
     try {
-      const response = await fetch('/api/generate-ontology', {
+      const response = await fetch(buildApiUrl('generate-ontology'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ description: description.trim() }),
       });
       
       if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || 'Failed to generate ontology');
+        const data: unknown = await response.json();
+        const apiError = isRecord(data) && typeof data.error === 'string'
+          ? data.error
+          : 'Failed to generate ontology';
+        throw new Error(apiError);
       }
       
-      const { ontology } = await response.json();
+      const data: unknown = await response.json();
+      const ontology = parseBuilderOntology(
+        isRecord(data) ? data.ontology : undefined,
+      );
       
-      // Assign default colors if missing
-      const defaultColors = ['#0078D4', '#107C10', '#5C2D91', '#FFB900', '#D83B01', '#00A9E0', '#8764B8', '#00B294'];
-      ontology.entityTypes = ontology.entityTypes.map((entity: { color?: string }, index: number) => ({
-        ...entity,
-        color: entity.color || defaultColors[index % defaultColors.length]
-      }));
-      
+      // Run the same Fabric IQ rule set the designer uses (issue #84):
+      // consistent attribute types, identifier type restrictions, required identifiers.
+      const validationErrors = validateOntology(ontology);
+      if (validationErrors.length > 0) {
+        throw new Error(formatValidationErrors(validationErrors));
+      }
+
       setGeneratedOntology(ontology);
       setEditedJson(JSON.stringify(ontology, null, 2));
       setStep('preview');
@@ -226,11 +282,25 @@ export function NLBuilderModal({ onClose }: NLBuilderModalProps) {
     if (!generatedOntology) return;
     
     try {
-      const ontologyToApply = editMode ? JSON.parse(editedJson) : generatedOntology;
+      const candidate: unknown = editMode
+        ? JSON.parse(editedJson)
+        : generatedOntology;
+      const ontologyToApply = parseBuilderOntology(candidate);
+      const validationErrors = validateOntology(ontologyToApply);
+      if (validationErrors.length > 0) {
+        setError(formatValidationErrors(validationErrors));
+        return;
+      }
       loadOntology(ontologyToApply);
       handleClose();
-    } catch {
-      setError('Invalid JSON in editor');
+    } catch (err) {
+      setError(
+        err instanceof SyntaxError
+          ? 'Invalid JSON in editor'
+          : err instanceof Error
+            ? err.message
+            : 'Invalid ontology in editor',
+      );
     }
   };
 
