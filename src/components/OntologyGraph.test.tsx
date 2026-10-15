@@ -55,6 +55,31 @@ const graphMocks = vi.hoisted(() => {
     })),
   });
 
+  let autoCompleteLayout = true;
+  let layoutStopHandler: (() => void) | null = null;
+  const emitLayoutStop = () => {
+    const handler = layoutStopHandler;
+    layoutStopHandler = null;
+    handler?.();
+  };
+  const layout = {
+    one: vi.fn((eventName: string, handler: () => void) => {
+      if (eventName === 'layoutstop') {
+        layoutStopHandler = handler;
+      }
+      return layout;
+    }),
+    run: vi.fn(() => {
+      if (autoCompleteLayout) {
+        emitLayoutStop();
+      }
+      return layout;
+    }),
+    stop: vi.fn(() => {
+      emitLayoutStop();
+      return layout;
+    }),
+  };
   const cy = {
     on: vi.fn(),
     off: vi.fn(),
@@ -66,7 +91,7 @@ const graphMocks = vi.hoisted(() => {
     nodes: vi.fn(() => collection),
     $: vi.fn(() => collection),
     getElementById: vi.fn(() => collection),
-    layout: vi.fn(() => ({ run: vi.fn() })),
+    layout: vi.fn(() => layout),
     zoom: vi.fn(() => 1),
     pan: vi.fn(() => ({ x: 123, y: 77 })),
     width: vi.fn(() => 800),
@@ -80,7 +105,20 @@ const graphMocks = vi.hoisted(() => {
     }),
   };
   const cytoscape = vi.fn(() => cy);
-  return { addClass, connectedEdges, cy, cytoscape };
+  return {
+    addClass,
+    connectedEdges,
+    cy,
+    cytoscape,
+    layout,
+    setAutoCompleteLayout(value: boolean) {
+      autoCompleteLayout = value;
+    },
+    resetLayout() {
+      autoCompleteLayout = true;
+      layoutStopHandler = null;
+    },
+  };
 });
 
 vi.mock('cytoscape', () => {
@@ -202,11 +240,14 @@ interface CapturedConfig {
 describe('OntologyGraph adaptive rendering', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    graphMocks.resetLayout();
     useAppStore.getState().resetToDefault();
     localStorage.removeItem('ontology-legend-collapsed');
     delete window.__ONTOLOGY_PREVIEW_CY__;
     delete window.__ONTOLOGY_GRAPH_METRICS__;
     delete window.__ONTOLOGY_GRAPH_PERFORMANCE_ENABLED__;
+    delete window.__ONTOLOGY_GRAPH_PAGE_MAX_LONG_TASK_MS__;
+    delete window.__ONTOLOGY_GRAPH_LAYOUT_ANIMATION_MS__;
     window.__ONTOLOGY_GRAPH_LAYOUT_DELAY_MS__ = 0;
   });
 
@@ -244,7 +285,13 @@ describe('OntologyGraph adaptive rendering', () => {
     });
 
     const config = graphMocks.cytoscape.mock.calls[0][0] as CapturedConfig;
-    expect(config.layout.name).toBe('breadthfirst');
+    expect(config.layout.name).toBe('preset');
+    expect(graphMocks.cy.layout).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'breadthfirst',
+        animate: true,
+      }),
+    );
     expect(config.elements.length).toBeLessThanOrEqual(
       MAX_RENDERED_NODES + MAX_RENDERED_EDGES,
     );
@@ -374,6 +421,56 @@ describe('OntologyGraph adaptive rendering', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('stops and resumes an active massive graph layout', () => {
+    vi.useFakeTimers();
+    graphMocks.setAutoCompleteLayout(false);
+    try {
+      useAppStore.getState().loadOntology(createLargeFixture());
+      render(<OntologyGraph />);
+
+      act(() => {
+        vi.advanceTimersByTime(0);
+      });
+      expect(screen.getByText('Laying out bounded graph')).toBeInTheDocument();
+      expect(graphMocks.layout.run).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Cancel rendering' }),
+      );
+      expect(graphMocks.layout.stop).toHaveBeenCalledTimes(1);
+      expect(screen.getByText('Rendering paused')).toBeInTheDocument();
+
+      graphMocks.setAutoCompleteLayout(true);
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Resume rendering' }),
+      );
+      act(() => {
+        vi.advanceTimersByTime(0);
+      });
+      expect(graphMocks.cytoscape).toHaveBeenCalledTimes(2);
+      expect(screen.queryByText('Rendering paused')).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('retries a failed standard graph layout', async () => {
+    graphMocks.cytoscape.mockImplementationOnce(() => {
+      throw new Error('Layout failed once');
+    });
+
+    render(<OntologyGraph />);
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Layout failed once',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => {
+      expect(graphMocks.cytoscape).toHaveBeenCalledTimes(2);
+    });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('applies a view change before a scheduled layout starts', () => {

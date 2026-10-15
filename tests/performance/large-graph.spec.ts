@@ -4,6 +4,8 @@ import {
   type Page,
   type TestInfo,
 } from '@playwright/test';
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import {
   DEFAULT_OVERVIEW_NODE_LIMIT,
   LARGE_GRAPH_INTERACTION_BUDGET_MS,
@@ -19,7 +21,9 @@ const BRICK_EDGE_COUNT = 1_736;
 interface PerformanceWindow extends Window {
   __ONTOLOGY_GRAPH_METRICS__?: OntologyGraphMetrics;
   __ONTOLOGY_GRAPH_PERFORMANCE_ENABLED__?: boolean;
-  __ONTOLOGY_GRAPH_LAYOUT_DELAY_MS__?: number;
+  __ONTOLOGY_GRAPH_LAYOUT_ANIMATION_MS__?: number;
+  __ONTOLOGY_GRAPH_PAGE_MAX_LONG_TASK_MS__?: number;
+  __ONTOLOGY_GRAPH_LONG_TASK_OBSERVER__?: PerformanceObserver;
 }
 
 interface PerformanceMemory {
@@ -30,6 +34,7 @@ interface PerformanceReport {
   flow: 'direct' | 'gallery' | 'cancel-resume';
   metrics: OntologyGraphMetrics;
   retainedHeapBytes: number | null;
+  pageMaxLongTaskDurationMs: number;
   interactionMs?: number;
   indexRequestCount: number;
   payloadRequestCount: number;
@@ -37,16 +42,45 @@ interface PerformanceReport {
 
 async function preparePage(
   page: Page,
-  layoutDelayMs?: number,
+  layoutAnimationMs?: number,
 ): Promise<void> {
-  await page.addInitScript((delay) => {
+  await page.addInitScript((animationDuration) => {
     localStorage.setItem('ontology-quest-tour-dismissed', 'true');
     const target = window as PerformanceWindow;
     target.__ONTOLOGY_GRAPH_PERFORMANCE_ENABLED__ = true;
-    if (delay !== undefined) {
-      target.__ONTOLOGY_GRAPH_LAYOUT_DELAY_MS__ = delay;
+    target.__ONTOLOGY_GRAPH_PAGE_MAX_LONG_TASK_MS__ = 0;
+    if (
+      typeof PerformanceObserver !== 'undefined'
+      && PerformanceObserver.supportedEntryTypes?.includes('longtask')
+    ) {
+      target.__ONTOLOGY_GRAPH_LONG_TASK_OBSERVER__ = new PerformanceObserver(
+        (list) => {
+          for (const entry of list.getEntries()) {
+            const maxDuration = Math.max(
+              target.__ONTOLOGY_GRAPH_PAGE_MAX_LONG_TASK_MS__ ?? 0,
+              entry.duration,
+            );
+            target.__ONTOLOGY_GRAPH_PAGE_MAX_LONG_TASK_MS__ = maxDuration;
+            if (target.__ONTOLOGY_GRAPH_METRICS__) {
+              target.__ONTOLOGY_GRAPH_METRICS__.maxLongTaskDurationMs =
+                Math.max(
+                  target.__ONTOLOGY_GRAPH_METRICS__
+                    .maxLongTaskDurationMs,
+                  maxDuration,
+                );
+            }
+          }
+        },
+      );
+      target.__ONTOLOGY_GRAPH_LONG_TASK_OBSERVER__.observe({
+        type: 'longtask',
+        buffered: true,
+      });
     }
-  }, layoutDelayMs);
+    if (animationDuration !== undefined) {
+      target.__ONTOLOGY_GRAPH_LAYOUT_ANIMATION_MS__ = animationDuration;
+    }
+  }, layoutAnimationMs);
 }
 
 async function waitForBrickLayout(page: Page): Promise<void> {
@@ -76,6 +110,13 @@ async function readRetainedHeap(page: Page): Promise<number | null> {
   ));
 }
 
+async function readPageMaxLongTaskDuration(page: Page): Promise<number> {
+  return page.evaluate(() => (
+    (window as PerformanceWindow)
+      .__ONTOLOGY_GRAPH_PAGE_MAX_LONG_TASK_MS__ ?? 0
+  ));
+}
+
 function catalogueRequestCounts(requestUrls: readonly string[]): {
   indexRequestCount: number;
   payloadRequestCount: number;
@@ -96,9 +137,20 @@ async function attachReport(
   testInfo: TestInfo,
   report: PerformanceReport,
 ): Promise<void> {
+  const reportBody = `${JSON.stringify(report, null, 2)}\n`;
+  const reportDirectory = path.resolve(
+    process.cwd(),
+    'test-results/large-graph/reports',
+  );
+  await mkdir(reportDirectory, { recursive: true });
+  const reportPath = path.join(
+    reportDirectory,
+    `${report.flow}-large-graph-performance.json`,
+  );
+  await writeFile(reportPath, reportBody, 'utf8');
   console.log(`Large graph performance: ${JSON.stringify(report)}`);
   await testInfo.attach(`${report.flow}-large-graph-performance.json`, {
-    body: Buffer.from(`${JSON.stringify(report, null, 2)}\n`),
+    path: reportPath,
     contentType: 'application/json',
   });
 }
@@ -106,6 +158,7 @@ async function attachReport(
 function expectInitialBudgets(
   metrics: OntologyGraphMetrics,
   retainedHeapBytes: number | null,
+  pageMaxLongTaskDurationMs: number,
 ): void {
   expect(metrics).toMatchObject({
     mode: 'bounded',
@@ -117,10 +170,10 @@ function expectInitialBudgets(
   expect(metrics.renderedNodeCount).toBeLessThanOrEqual(
     DEFAULT_OVERVIEW_NODE_LIMIT,
   );
-  expect(metrics.lastLayoutDurationMs).toBeLessThan(
+  expect(metrics.maxLongTaskDurationMs).toBeLessThan(
     LARGE_GRAPH_LONG_TASK_BUDGET_MS,
   );
-  expect(metrics.maxLongTaskDurationMs).toBeLessThan(
+  expect(pageMaxLongTaskDurationMs).toBeLessThan(
     LARGE_GRAPH_LONG_TASK_BUDGET_MS,
   );
   expect(retainedHeapBytes).not.toBeNull();
@@ -145,12 +198,8 @@ test('direct Brick link stays within the rendering budgets', async ({
 
   const initialMetrics = await readMetrics(page);
   const retainedHeapBytes = await readRetainedHeap(page);
+  const pageMaxLongTaskDurationMs = await readPageMaxLongTaskDuration(page);
   const counts = catalogueRequestCounts(requestUrls);
-  expectInitialBudgets(initialMetrics, retainedHeapBytes);
-  expect(counts).toEqual({
-    indexRequestCount: 1,
-    payloadRequestCount: 1,
-  });
 
   await page.getByRole(
     'searchbox',
@@ -173,17 +222,27 @@ test('direct Brick link stays within the rendering budgets', async ({
       - performance.getEntriesByName('large-graph-interaction-start')
         .at(-1)!.startTime
   ));
-  expect(interactionMs).toBeLessThan(
-    LARGE_GRAPH_INTERACTION_BUDGET_MS,
-  );
 
   await attachReport(testInfo, {
     flow: 'direct',
     metrics: initialMetrics,
     retainedHeapBytes,
+    pageMaxLongTaskDurationMs,
     interactionMs,
     ...counts,
   });
+  expectInitialBudgets(
+    initialMetrics,
+    retainedHeapBytes,
+    pageMaxLongTaskDurationMs,
+  );
+  expect(counts).toEqual({
+    indexRequestCount: 1,
+    payloadRequestCount: 1,
+  });
+  expect(interactionMs).toBeLessThan(
+    LARGE_GRAPH_INTERACTION_BUDGET_MS,
+  );
 });
 
 test('Gallery Load lays out Brick once', async ({ page }, testInfo) => {
@@ -206,25 +265,31 @@ test('Gallery Load lays out Brick once', async ({ page }, testInfo) => {
 
   const metrics = await readMetrics(page);
   const retainedHeapBytes = await readRetainedHeap(page);
+  const pageMaxLongTaskDurationMs = await readPageMaxLongTaskDuration(page);
   const counts = catalogueRequestCounts(requestUrls);
-  expectInitialBudgets(metrics, retainedHeapBytes);
-  expect(counts).toEqual({
-    indexRequestCount: 1,
-    payloadRequestCount: 1,
-  });
 
   await attachReport(testInfo, {
     flow: 'gallery',
     metrics,
     retainedHeapBytes,
+    pageMaxLongTaskDurationMs,
     ...counts,
+  });
+  expectInitialBudgets(
+    metrics,
+    retainedHeapBytes,
+    pageMaxLongTaskDurationMs,
+  );
+  expect(counts).toEqual({
+    indexRequestCount: 1,
+    payloadRequestCount: 1,
   });
 });
 
-test('scheduled Brick rendering can change view and cancel', async ({
+test('active Brick rendering can change view and cancel', async ({
   page,
 }, testInfo) => {
-  await preparePage(page, 1_000);
+  await preparePage(page, 500);
   const requestUrls: string[] = [];
   page.on('request', (request) => {
     if (request.url().includes('catalogue')) {
@@ -233,19 +298,23 @@ test('scheduled Brick rendering can change view and cancel', async ({
   });
 
   await page.goto(BRICK_ROUTE, { waitUntil: 'domcontentloaded' });
-  await page.getByRole(
-    'button',
-    { name: 'Cancel rendering' },
-  ).waitFor();
+  await page.waitForFunction(() => (
+    (window as PerformanceWindow).__ONTOLOGY_GRAPH_METRICS__?.status
+      === 'running'
+  ));
   await page.getByRole(
     'searchbox',
     { name: 'Jump to an entity' },
   ).fill('Zone');
   await page.getByRole('button', { name: 'Find', exact: true }).click();
   await expect(page.locator('.large-graph-result')).toContainText('matching');
+  await page.waitForFunction(() => (
+    (window as PerformanceWindow).__ONTOLOGY_GRAPH_METRICS__?.status
+      === 'running'
+  ));
   await page.getByRole('button', { name: 'Cancel rendering' }).click();
   await expect(page.getByText('Rendering paused')).toBeVisible();
-  await page.waitForTimeout(1_100);
+  await page.waitForTimeout(600);
 
   const cancelledMetrics = await readMetrics(page);
   expect(cancelledMetrics).toMatchObject({
@@ -258,6 +327,14 @@ test('scheduled Brick rendering can change view and cancel', async ({
   await waitForBrickLayout(page);
   const metrics = await readMetrics(page);
   const retainedHeapBytes = await readRetainedHeap(page);
+  const pageMaxLongTaskDurationMs = await readPageMaxLongTaskDuration(page);
+  await attachReport(testInfo, {
+    flow: 'cancel-resume',
+    metrics,
+    retainedHeapBytes,
+    pageMaxLongTaskDurationMs,
+    ...catalogueRequestCounts(requestUrls),
+  });
   expect(metrics).toMatchObject({
     renderedNodeCount: 20,
     layoutCount: 1,
@@ -266,11 +343,7 @@ test('scheduled Brick rendering can change view and cancel', async ({
   expect(metrics.maxLongTaskDurationMs).toBeLessThan(
     LARGE_GRAPH_LONG_TASK_BUDGET_MS,
   );
-
-  await attachReport(testInfo, {
-    flow: 'cancel-resume',
-    metrics,
-    retainedHeapBytes,
-    ...catalogueRequestCounts(requestUrls),
-  });
+  expect(pageMaxLongTaskDurationMs).toBeLessThan(
+    LARGE_GRAPH_LONG_TASK_BUDGET_MS,
+  );
 });

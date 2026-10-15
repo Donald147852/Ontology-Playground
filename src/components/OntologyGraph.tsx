@@ -12,6 +12,7 @@ import type {
   Core,
   ElementDefinition,
   EventObject,
+  Layouts,
   LayoutOptions,
 } from 'cytoscape';
 import { useAppStore } from '../store/appStore';
@@ -56,6 +57,8 @@ declare global {
     __ONTOLOGY_GRAPH_METRICS__?: OntologyGraphMetrics;
     __ONTOLOGY_GRAPH_PERFORMANCE_ENABLED__?: boolean;
     __ONTOLOGY_GRAPH_LAYOUT_DELAY_MS__?: number;
+    __ONTOLOGY_GRAPH_LAYOUT_ANIMATION_MS__?: number;
+    __ONTOLOGY_GRAPH_PAGE_MAX_LONG_TASK_MS__?: number;
   }
 }
 
@@ -80,6 +83,7 @@ const MIN_GRAPH_ZOOM = 0.3;
 const MAX_GRAPH_ZOOM = 3;
 const GRAPH_ZOOM_STEP = 0.3;
 const DEFAULT_BOUNDED_LAYOUT_DELAY_MS = 50;
+const DEFAULT_BOUNDED_LAYOUT_ANIMATION_MS = 25;
 const EMPTY_EXPANDED_NODE_IDS = new Set<string>();
 
 function retainedHeapBytes(): number | null {
@@ -88,6 +92,15 @@ function retainedHeapBytes(): number | null {
       memory?: { usedJSHeapSize?: number };
     }
   ).memory?.usedJSHeapSize ?? null;
+}
+
+function boundedLayoutAnimationMs(): number {
+  const configuredDuration = window.__ONTOLOGY_GRAPH_LAYOUT_ANIMATION_MS__;
+  return typeof configuredDuration === 'number'
+    && Number.isFinite(configuredDuration)
+    && configuredDuration >= 0
+    ? Math.min(configuredDuration, 5_000)
+    : DEFAULT_BOUNDED_LAYOUT_ANIMATION_MS;
 }
 
 function graphLayoutOptions(
@@ -100,7 +113,8 @@ function graphLayoutOptions(
       directed: false,
       circle: true,
       roots: [...rootIds],
-      animate: false,
+      animate: true,
+      animationDuration: boundedLayoutAnimationMs(),
       fit: true,
       padding: 60,
       spacingFactor: 1.7,
@@ -174,6 +188,8 @@ export function OntologyGraph() {
   const scheduledGraphViewRef = useRef<ReturnType<
     typeof createGraphView
   > | null>(null);
+  const activeLayoutRef = useRef<Layouts | null>(null);
+  const layoutCancellationRequestedRef = useRef(false);
   const metricsOntologyRef = useRef<unknown>(null);
   
   // Helper to safely get cytoscape instance - returns null if destroyed
@@ -431,6 +447,7 @@ export function OntologyGraph() {
     setLargeSearch('');
     setLargeDepth(DEFAULT_LARGE_GRAPH_DEPTH);
     setExpandedNodeIds(EMPTY_EXPANDED_NODE_IDS);
+    layoutCancellationRequestedRef.current = false;
     setLayoutPaused(false);
     setLayoutError(null);
     setFocusNodeId(null);
@@ -525,7 +542,8 @@ export function OntologyGraph() {
       renderedEdgeCount: initialGraphView.visibleEdgeCount,
       layoutCount: 0,
       lastLayoutDurationMs: 0,
-      maxLongTaskDurationMs: 0,
+      maxLongTaskDurationMs:
+        window.__ONTOLOGY_GRAPH_PAGE_MAX_LONG_TASK_MS__ ?? 0,
       retainedHeapBytes: retainedHeapBytes(),
       status: 'idle',
     };
@@ -544,13 +562,18 @@ export function OntologyGraph() {
           return;
         }
         for (const entry of list.getEntries()) {
+          const maxDuration = Math.max(
+            window.__ONTOLOGY_GRAPH_PAGE_MAX_LONG_TASK_MS__ ?? 0,
+            entry.duration,
+          );
+          window.__ONTOLOGY_GRAPH_PAGE_MAX_LONG_TASK_MS__ = maxDuration;
           metrics.maxLongTaskDurationMs = Math.max(
             metrics.maxLongTaskDurationMs,
-            entry.duration,
+            maxDuration,
           );
         }
       });
-      observer.observe({ type: 'longtask', buffered: false });
+      observer.observe({ type: 'longtask', buffered: true });
     }
 
     return () => observer?.disconnect();
@@ -605,6 +628,8 @@ export function OntologyGraph() {
     const layoutStartedAt = performance.now();
     let retainedHeapTimer: number | undefined;
     let createdCy: Core | null = null;
+    let boundedLayout: Layouts | null = null;
+    let disposed = false;
 
     try {
       const baseElements = buildElements();
@@ -782,7 +807,7 @@ export function OntologyGraph() {
         }
       ],
        
-      layout: positionedElements
+      layout: positionedElements || isBoundedView
         ? { name: 'preset', fit: false }
         : graphLayoutOptions(graphView.mode, graphRootIds),
       minZoom: MIN_GRAPH_ZOOM,
@@ -902,32 +927,67 @@ export function OntologyGraph() {
         });
     }
 
-    const metrics = window.__ONTOLOGY_GRAPH_METRICS__;
-    if (
-      metrics
-      && metricsOntologyRef.current === currentOntology
-    ) {
-      metrics.mode = graphView.mode;
-      metrics.renderedNodeCount = graphView.visibleNodeCount;
-      metrics.renderedEdgeCount = graphView.visibleEdgeCount;
-      metrics.layoutCount += 1;
-      metrics.lastLayoutDurationMs = performance.now() - layoutStartedAt;
-      metrics.retainedHeapBytes = retainedHeapBytes();
-    }
-    updateLayoutStatus('idle');
-    retainedHeapTimer = window.setTimeout(() => {
-      const settledMetrics = window.__ONTOLOGY_GRAPH_METRICS__;
+    let layoutCompleted = false;
+    const completeLayout = () => {
+      if (disposed || layoutCompleted) return;
+      layoutCompleted = true;
+      const metrics = window.__ONTOLOGY_GRAPH_METRICS__;
       if (
-        settledMetrics
+        metrics
         && metricsOntologyRef.current === currentOntology
       ) {
-        settledMetrics.retainedHeapBytes = retainedHeapBytes();
+        metrics.mode = graphView.mode;
+        metrics.renderedNodeCount = graphView.visibleNodeCount;
+        metrics.renderedEdgeCount = graphView.visibleEdgeCount;
+        metrics.layoutCount += 1;
+        metrics.lastLayoutDurationMs = performance.now() - layoutStartedAt;
+        metrics.retainedHeapBytes = retainedHeapBytes();
       }
-    }, 500);
+      updateLayoutStatus('idle');
+      retainedHeapTimer = window.setTimeout(() => {
+        const settledMetrics = window.__ONTOLOGY_GRAPH_METRICS__;
+        if (
+          settledMetrics
+          && metricsOntologyRef.current === currentOntology
+        ) {
+          settledMetrics.retainedHeapBytes = retainedHeapBytes();
+        }
+      }, 500);
+    };
+
+    if (isBoundedView && !positionedElements) {
+      layoutCancellationRequestedRef.current = false;
+      boundedLayout = cy.layout(
+        graphLayoutOptions(
+          graphView.mode,
+          graphRootIds,
+        ) as Parameters<Core['layout']>[0],
+      );
+      activeLayoutRef.current = boundedLayout;
+      boundedLayout.one('layoutstop', () => {
+        if (disposed) return;
+        if (activeLayoutRef.current === boundedLayout) {
+          activeLayoutRef.current = null;
+        }
+        if (layoutCancellationRequestedRef.current) {
+          updateLayoutStatus('cancelled');
+          return;
+        }
+        completeLayout();
+      });
+      boundedLayout.run();
+    } else {
+      completeLayout();
+    }
 
     return () => {
+      disposed = true;
       mountedRef.current = false;
       window.clearTimeout(retainedHeapTimer);
+      if (activeLayoutRef.current === boundedLayout) {
+        activeLayoutRef.current = null;
+      }
+      boundedLayout?.stop();
       if (window.__ONTOLOGY_PREVIEW_CY__ === cy) {
         delete window.__ONTOLOGY_PREVIEW_CY__;
       }
@@ -935,7 +995,12 @@ export function OntologyGraph() {
       cyRef.current = null;
     };
     } catch (error) {
+      disposed = true;
       window.clearTimeout(retainedHeapTimer);
+      if (activeLayoutRef.current === boundedLayout) {
+        activeLayoutRef.current = null;
+      }
+      boundedLayout?.stop();
       createdCy?.destroy();
       if (cyRef.current === createdCy) {
         cyRef.current = null;
@@ -958,6 +1023,7 @@ export function OntologyGraph() {
     graphView,
     graphRootIds,
     isBoundedView,
+    layoutRetry,
     layoutRunVersion,
     selectEntity,
     selectRelationship,
@@ -1111,10 +1177,14 @@ export function OntologyGraph() {
   };
 
   const handleCancelLayout = () => {
+    layoutCancellationRequestedRef.current = true;
+    activeLayoutRef.current?.stop();
     setLayoutPaused(true);
+    updateLayoutStatus('cancelled');
   };
 
   const handleResumeLayout = () => {
+    layoutCancellationRequestedRef.current = false;
     setLayoutError(null);
     setLayoutPaused(false);
     setLayoutRetry((retry) => retry + 1);
@@ -1367,9 +1437,11 @@ export function OntologyGraph() {
           ) : (
             <>
               <strong>
-                {layoutStatus === 'scheduled'
-                  ? 'Preparing bounded graph'
-                  : 'Laying out bounded graph'}
+                {isBoundedView
+                  ? layoutStatus === 'scheduled'
+                    ? 'Preparing bounded graph'
+                    : 'Laying out bounded graph'
+                  : 'Laying out graph'}
               </strong>
               <span>
                 Navigation and size-aware controls remain available.
