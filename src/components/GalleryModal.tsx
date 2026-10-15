@@ -152,11 +152,9 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
   }, [loadedEntries]);
 
   const handleLoadOntology = async (entry: CatalogueEntry) => {
-    const loaded = await getLoadedEntry(entry);
-    if (!loaded) return;
+    if (!await getLoadedEntry(entry)) return;
 
-    loadOntology(loaded.ontology, loaded.bindings);
-    // Navigate to the ontology deep link so the URL is shareable
+    // The deep-link effect consumes the cached payload and loads it once.
     navigate({
       page: 'catalogue',
       ontologyId: entry.id,

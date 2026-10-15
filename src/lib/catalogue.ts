@@ -1,10 +1,12 @@
-import type { DataBinding, Ontology } from '../data/ontology';
+import type { DataBinding } from '../data/ontology';
 import type {
   Catalogue,
   CatalogueEntry,
   CatalogueEntryPayload,
   LoadedCatalogueEntry,
 } from '../types/catalogue';
+import { isValidCatalogueId } from './catalogueId';
+import { parseOntologyValue } from './ontologySchema';
 
 export class CatalogueLoadError extends Error {
   constructor(message: string) {
@@ -81,6 +83,16 @@ function parseCatalogueEntry(value: unknown): CatalogueEntry {
   if (!/^sha256:[a-f0-9]{64}$/.test(value.payloadHash as string)) {
     throw new CatalogueLoadError('Catalogue entry has invalid payload hash');
   }
+  if (!isValidCatalogueId(value.id as string)) {
+    throw new CatalogueLoadError('Catalogue entry has invalid id');
+  }
+
+  const payloadHash = value.payloadHash as string;
+  const expectedPayloadUrl =
+    `catalogue-payloads/${value.id}/${payloadHash.slice('sha256:'.length)}.json`;
+  if (value.payloadUrl !== expectedPayloadUrl) {
+    throw new CatalogueLoadError('Catalogue entry has invalid payload URL');
+  }
 
   return {
     id: value.id as string,
@@ -94,7 +106,7 @@ function parseCatalogueEntry(value: unknown): CatalogueEntry {
     entityCount: value.entityCount as number,
     relationshipCount: value.relationshipCount as number,
     payloadUrl: value.payloadUrl as string,
-    payloadHash: value.payloadHash as string,
+    payloadHash,
     license: optionalString(value.license, 'license'),
     sourceUrl: optionalString(value.sourceUrl, 'sourceUrl'),
     version: optionalString(value.version, 'version'),
@@ -117,6 +129,9 @@ function parseCatalogue(value: unknown): Catalogue {
   if (value.count !== entries.length) {
     throw new CatalogueLoadError('Catalogue entry count does not match index');
   }
+  if (new Set(entries.map((entry) => entry.id)).size !== entries.length) {
+    throw new CatalogueLoadError('Catalogue index contains duplicate entry IDs');
+  }
 
   return {
     schemaVersion: 2,
@@ -124,14 +139,6 @@ function parseCatalogue(value: unknown): Catalogue {
     count: value.count as number,
     entries,
   };
-}
-
-function isOntology(value: unknown): value is Ontology {
-  return isRecord(value)
-    && typeof value.name === 'string'
-    && typeof value.description === 'string'
-    && Array.isArray(value.entityTypes)
-    && Array.isArray(value.relationships);
 }
 
 function isDataBinding(value: unknown): value is DataBinding {
@@ -157,7 +164,6 @@ function parsePayload(
     !isRecord(value)
     || value.schemaVersion !== 1
     || value.id !== expectedId
-    || !isOntology(value.ontology)
     || !Array.isArray(value.bindings)
     || !value.bindings.every(isDataBinding)
   ) {
@@ -166,10 +172,20 @@ function parsePayload(
     );
   }
 
+  const parsedOntology = parseOntologyValue(value.ontology);
+  if (!parsedOntology.ontology) {
+    const firstIssue = parsedOntology.issues[0]?.message;
+    throw new CatalogueLoadError(
+      `Malformed catalogue payload for "${expectedId}"${
+        firstIssue ? `: ${firstIssue}` : ''
+      }`,
+    );
+  }
+
   return {
     schemaVersion: 1,
     id: expectedId,
-    ontology: value.ontology,
+    ontology: parsedOntology.ontology,
     bindings: value.bindings,
   };
 }
@@ -309,6 +325,14 @@ async function fetchCatalogueEntry(
   }
 
   const payload = parsePayload(value, entry.id);
+  if (
+    payload.ontology.entityTypes.length !== entry.entityCount
+    || payload.ontology.relationships.length !== entry.relationshipCount
+  ) {
+    throw new CatalogueLoadError(
+      `Catalogue payload counts do not match the index for "${entry.id}"`,
+    );
+  }
   return {
     ...entry,
     ontology: payload.ontology,

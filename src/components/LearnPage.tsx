@@ -222,13 +222,6 @@ function replaceEmbedPlaceholder(
   element.replaceWith(wrapper);
 }
 
-function renderEmbedError(slot: HTMLElement, message: string) {
-  const error = document.createElement('div');
-  error.className = 'learn-embed-error';
-  error.textContent = message;
-  slot.replaceChildren(error);
-}
-
 function ArticleView({
   article,
   course,

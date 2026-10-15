@@ -79,13 +79,14 @@ function createEntry(
 ): CatalogueEntry {
   const payload = fakePayloads[metadata.id];
   const content = JSON.stringify(payload, null, 2) + '\n';
+  const hash = createHash('sha256').update(content).digest('hex');
 
   return {
     ...metadata,
     entityCount: payload.ontology.entityTypes.length,
     relationshipCount: payload.ontology.relationships.length,
-    payloadUrl: `catalogue-payloads/${metadata.id}/payload.json`,
-    payloadHash: `sha256:${createHash('sha256').update(content).digest('hex')}`,
+    payloadUrl: `catalogue-payloads/${metadata.id}/${hash}.json`,
+    payloadHash: `sha256:${hash}`,
   };
 }
 
@@ -311,8 +312,8 @@ describe('GalleryModal', () => {
     expect(screen.getByText('No ontologies match your filters.')).toBeTruthy();
   });
 
-  it('loads an ontology and navigates to its deep link', async () => {
-    mockFetchSuccess();
+  it('preloads one payload and lets the deep-link effect load the ontology once', async () => {
+    const fetchMock = mockFetchSuccess();
     const user = userEvent.setup();
     render(<GalleryModal onClose={onClose} />);
 
@@ -320,16 +321,17 @@ describe('GalleryModal', () => {
       expect(screen.getByText('Fourth Coffee')).toBeTruthy();
     });
 
-    // Click the first non-active ontology's "Load" button.
+    const initialOntology = useAppStore.getState().currentOntology;
     const loadButtons = screen.getAllByText('Load');
     await user.click(loadButtons[0]);
 
     await waitFor(() => {
-      expect(useAppStore.getState().currentOntology.name).toBe('Hospital Network');
+      expect(window.location.hash).toBe(
+        '#/catalogue/community/drsmith/hospital-net',
+      );
     });
-    expect(useAppStore.getState().currentOntology.entityTypes).toHaveLength(4);
-    // Now navigates to deep link instead of calling onClose
-    expect(window.location.hash).toBe('#/catalogue/community/drsmith/hospital-net');
+    expect(useAppStore.getState().currentOntology).toBe(initialOntology);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('surfaces payload failures without loading an empty ontology', async () => {

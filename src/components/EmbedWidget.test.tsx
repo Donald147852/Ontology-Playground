@@ -35,6 +35,9 @@ const fakePayload: CatalogueEntryPayload = {
   bindings: [],
 };
 const fakePayloadContent = JSON.stringify(fakePayload, null, 2) + '\n';
+const fakePayloadHash = createHash('sha256')
+  .update(fakePayloadContent)
+  .digest('hex');
 
 const fakeCatalogue: Catalogue = {
   schemaVersion: 2,
@@ -51,8 +54,8 @@ const fakeCatalogue: Catalogue = {
     source: 'official',
     entityCount: 2,
     relationshipCount: 1,
-    payloadUrl: 'catalogue-payloads/official/test/payload.json',
-    payloadHash: `sha256:${createHash('sha256').update(fakePayloadContent).digest('hex')}`,
+    payloadUrl: `catalogue-payloads/official/test/${fakePayloadHash}.json`,
+    payloadHash: `sha256:${fakePayloadHash}`,
   }],
 };
 

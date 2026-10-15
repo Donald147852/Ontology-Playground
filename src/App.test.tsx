@@ -1,5 +1,5 @@
 import { render, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import { useAppStore } from './store/appStore';
 import { loadCatalogueEntry } from './lib/catalogue';
@@ -78,10 +78,16 @@ const linkedEntry: LoadedCatalogueEntry = {
 describe('catalogue deep links', () => {
   beforeEach(() => {
     vi.mocked(loadCatalogueEntry).mockReset();
+    useAppStore.getState().resetToDefault();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('loads the linked catalogue entry exactly once', async () => {
     vi.mocked(loadCatalogueEntry).mockResolvedValue(linkedEntry);
+    const loadOntology = vi.spyOn(useAppStore.getState(), 'loadOntology');
 
     render(<App />);
 
@@ -90,5 +96,10 @@ describe('catalogue deep links', () => {
     });
     expect(loadCatalogueEntry).toHaveBeenCalledTimes(1);
     expect(loadCatalogueEntry).toHaveBeenCalledWith('official/deep-link-test');
+    expect(loadOntology).toHaveBeenCalledTimes(1);
+    expect(loadOntology).toHaveBeenCalledWith(
+      linkedEntry.ontology,
+      linkedEntry.bindings,
+    );
   });
 });
