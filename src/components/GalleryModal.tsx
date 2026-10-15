@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Layers, ArrowRight, Search, Code, User, Pencil, Share2, ExternalLink, Scale } from 'lucide-react';
 import { useDesignerStore } from '../store/designerStore';
@@ -33,6 +33,15 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
   const [loadedEntries, setLoadedEntries] = useState<Record<string, LoadedCatalogueEntry>>({});
   const [loadingEntryIds, setLoadingEntryIds] = useState<Set<string>>(new Set());
   const [payloadErrors, setPayloadErrors] = useState<Record<string, string>>({});
+  const mountedRef = useRef(false);
+  const latestActionRef = useRef(0);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Keep filters in sync with URL query params (including page refresh + hash navigation)
   useEffect(() => {
@@ -116,6 +125,7 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
 
   const getLoadedEntry = useCallback(async (
     entry: CatalogueEntry,
+    actionId: number,
   ): Promise<LoadedCatalogueEntry | null> => {
     const cached = loadedEntries[entry.id];
     if (cached) return cached;
@@ -129,30 +139,44 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
 
     try {
       const loaded = await loadCatalogueEntry(entry.id);
-      setLoadedEntries((current) => ({
-        ...current,
-        [entry.id]: loaded,
-      }));
+      if (
+        mountedRef.current
+        && actionId === latestActionRef.current
+      ) {
+        setLoadedEntries((current) => ({
+          ...current,
+          [entry.id]: loaded,
+        }));
+      }
       return loaded;
     } catch (loadError) {
-      setPayloadErrors((current) => ({
-        ...current,
-        [entry.id]: loadError instanceof Error
-          ? loadError.message
-          : 'Failed to load ontology payload',
-      }));
+      if (
+        mountedRef.current
+        && actionId === latestActionRef.current
+      ) {
+        setPayloadErrors((current) => ({
+          ...current,
+          [entry.id]: loadError instanceof Error
+            ? loadError.message
+            : 'Failed to load ontology payload',
+        }));
+      }
       return null;
     } finally {
-      setLoadingEntryIds((current) => {
-        const next = new Set(current);
-        next.delete(entry.id);
-        return next;
-      });
+      if (mountedRef.current) {
+        setLoadingEntryIds((current) => {
+          const next = new Set(current);
+          next.delete(entry.id);
+          return next;
+        });
+      }
     }
   }, [loadedEntries]);
 
   const handleLoadOntology = async (entry: CatalogueEntry) => {
-    if (!await getLoadedEntry(entry)) return;
+    const actionId = ++latestActionRef.current;
+    if (!await getLoadedEntry(entry, actionId)) return;
+    if (!mountedRef.current || actionId !== latestActionRef.current) return;
 
     // The deep-link effect consumes the cached payload and loads it once.
     navigate({
@@ -165,19 +189,32 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
 
   const handleViewRdf = async (entry: CatalogueEntry) => {
     if (rdfViewId === entry.id) {
+      latestActionRef.current++;
       setRdfViewId(null);
       return;
     }
 
-    const loaded = await getLoadedEntry(entry);
-    if (loaded) {
+    const actionId = ++latestActionRef.current;
+    const loaded = await getLoadedEntry(entry, actionId);
+    if (
+      loaded
+      && mountedRef.current
+      && actionId === latestActionRef.current
+    ) {
       setRdfViewId(entry.id);
     }
   };
 
   const handleEditOntology = async (entry: CatalogueEntry) => {
-    const loaded = await getLoadedEntry(entry);
-    if (!loaded) return;
+    const actionId = ++latestActionRef.current;
+    const loaded = await getLoadedEntry(entry, actionId);
+    if (
+      !loaded
+      || !mountedRef.current
+      || actionId !== latestActionRef.current
+    ) {
+      return;
+    }
 
     loadOntology(loaded.ontology, loaded.bindings);
     useDesignerStore.getState().loadDraft(loaded.ontology);
@@ -193,13 +230,18 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
     });
   };
 
+  const handleClose = useCallback(() => {
+    latestActionRef.current++;
+    onClose();
+  }, [onClose]);
+
   return (
     <motion.div
       className="modal-overlay"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      onClick={onClose}
+      onClick={handleClose}
     >
       <motion.div
         className="modal-content"
@@ -217,7 +259,7 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
               Browse and load ontologies from the catalogue
             </p>
           </div>
-          <button className="icon-btn" onClick={onClose}>
+          <button className="icon-btn" onClick={handleClose}>
             <X size={20} />
           </button>
         </div>
@@ -640,7 +682,7 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
         </div>
 
         <div style={{ marginTop: 20, textAlign: 'center' }}>
-          <button className="btn btn-primary" onClick={onClose}>
+          <button className="btn btn-primary" onClick={handleClose}>
             Done
           </button>
         </div>

@@ -16,7 +16,10 @@ export class CatalogueLoadError extends Error {
 }
 
 const indexRequests = new Map<string, Promise<Catalogue>>();
+const indexRefreshRequests = new Map<string, Promise<Catalogue>>();
 const entryRequests = new Map<string, Promise<LoadedCatalogueEntry>>();
+
+class StaleCataloguePayloadError extends CatalogueLoadError {}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -206,10 +209,15 @@ export function getCatalogueIndexUrl(
   return new URL('catalogue.json', directoryBase).href;
 }
 
-async function fetchCatalogueIndex(indexUrl: string): Promise<Catalogue> {
+async function fetchCatalogueIndex(
+  indexUrl: string,
+  bypassBrowserCache = false,
+): Promise<Catalogue> {
   let response: Response;
   try {
-    response = await fetch(indexUrl);
+    response = bypassBrowserCache
+      ? await fetch(indexUrl, { cache: 'no-store' })
+      : await fetch(indexUrl);
   } catch (error) {
     throw new CatalogueLoadError(
       `Failed to load catalogue: ${
@@ -233,6 +241,24 @@ async function fetchCatalogueIndex(indexUrl: string): Promise<Catalogue> {
   return parseCatalogue(value);
 }
 
+function requestCatalogueIndex(
+  indexUrl: string,
+  bypassBrowserCache = false,
+): Promise<Catalogue> {
+  const request: Promise<Catalogue> = fetchCatalogueIndex(
+    indexUrl,
+    bypassBrowserCache,
+  )
+    .catch((error) => {
+      if (indexRequests.get(indexUrl) === request) {
+        indexRequests.delete(indexUrl);
+      }
+      throw error;
+    });
+  indexRequests.set(indexUrl, request);
+  return request;
+}
+
 export function loadCatalogueIndex(
   baseUrl: string = import.meta.env.BASE_URL,
 ): Promise<Catalogue> {
@@ -240,11 +266,21 @@ export function loadCatalogueIndex(
   const cached = indexRequests.get(indexUrl);
   if (cached) return cached;
 
-  const request = fetchCatalogueIndex(indexUrl).catch((error) => {
-    indexRequests.delete(indexUrl);
-    throw error;
-  });
-  indexRequests.set(indexUrl, request);
+  return requestCatalogueIndex(indexUrl);
+}
+
+function refreshCatalogueIndex(indexUrl: string): Promise<Catalogue> {
+  const activeRefresh = indexRefreshRequests.get(indexUrl);
+  if (activeRefresh) return activeRefresh;
+
+  const request = requestCatalogueIndex(indexUrl, true);
+  indexRefreshRequests.set(indexUrl, request);
+  const clearRefresh = () => {
+    if (indexRefreshRequests.get(indexUrl) === request) {
+      indexRefreshRequests.delete(indexUrl);
+    }
+  };
+  request.then(clearRefresh, clearRefresh);
   return request;
 }
 
@@ -296,7 +332,10 @@ async function fetchCatalogueEntry(
   }
 
   if (!response.ok) {
-    throw new CatalogueLoadError(
+    const ErrorType = response.status === 404 || response.status === 410
+      ? StaleCataloguePayloadError
+      : CatalogueLoadError;
+    throw new ErrorType(
       `Failed to load ontology "${entry.id}" (${response.status})`,
     );
   }
@@ -310,7 +349,7 @@ async function fetchCatalogueEntry(
     );
   }
   if (await hashPayload(content) !== entry.payloadHash) {
-    throw new CatalogueLoadError(
+    throw new StaleCataloguePayloadError(
       `Catalogue payload integrity check failed for "${entry.id}"`,
     );
   }
@@ -340,6 +379,51 @@ async function fetchCatalogueEntry(
   };
 }
 
+function findCatalogueEntry(
+  catalogue: Catalogue,
+  id: string,
+): CatalogueEntry | undefined {
+  return catalogue.entries.find((candidate) => candidate.id === id);
+}
+
+async function loadCatalogueEntryUncached(
+  id: string,
+  baseUrl: string,
+  indexUrl: string,
+): Promise<LoadedCatalogueEntry> {
+  let catalogue = await loadCatalogueIndex(baseUrl);
+  let entry = findCatalogueEntry(catalogue, id);
+
+  if (!entry) {
+    catalogue = await refreshCatalogueIndex(indexUrl);
+    entry = findCatalogueEntry(catalogue, id);
+    if (!entry) {
+      throw new CatalogueLoadError(
+        `Ontology "${id}" not found in catalogue`,
+      );
+    }
+  }
+
+  try {
+    return await fetchCatalogueEntry(entry, indexUrl);
+  } catch (error) {
+    if (!(error instanceof StaleCataloguePayloadError)) throw error;
+
+    const refreshedCatalogue = await refreshCatalogueIndex(indexUrl);
+    const refreshedEntry = findCatalogueEntry(refreshedCatalogue, id);
+    if (
+      !refreshedEntry
+      || (
+        refreshedEntry.payloadHash === entry.payloadHash
+        && refreshedEntry.payloadUrl === entry.payloadUrl
+      )
+    ) {
+      throw error;
+    }
+    return fetchCatalogueEntry(refreshedEntry, indexUrl);
+  }
+}
+
 export async function loadCatalogueEntry(
   id: string,
   baseUrl: string = import.meta.env.BASE_URL,
@@ -349,16 +433,7 @@ export async function loadCatalogueEntry(
   const cached = entryRequests.get(cacheKey);
   if (cached) return cached;
 
-  const request = loadCatalogueIndex(baseUrl)
-    .then((catalogue) => {
-      const entry = catalogue.entries.find((candidate) => candidate.id === id);
-      if (!entry) {
-        throw new CatalogueLoadError(
-          `Ontology "${id}" not found in catalogue`,
-        );
-      }
-      return fetchCatalogueEntry(entry, indexUrl);
-    })
+  const request = loadCatalogueEntryUncached(id, baseUrl, indexUrl)
     .catch((error) => {
       entryRequests.delete(cacheKey);
       throw error;
@@ -370,5 +445,6 @@ export async function loadCatalogueEntry(
 
 export function clearCatalogueCache(): void {
   indexRequests.clear();
+  indexRefreshRequests.clear();
   entryRequests.clear();
 }

@@ -11,6 +11,7 @@ import { createHash } from 'node:crypto';
 import {
   closeSync,
   constants,
+  existsSync,
   fstatSync,
   lstatSync,
   mkdirSync,
@@ -634,27 +635,39 @@ export function runCatalogueCompiler(
   const payloadDirectory = outputPath === OUTPUT_PATH
     ? PAYLOAD_DIR
     : join(dirname(outputPath), 'catalogue-payloads');
-  const stagingDirectory = `${payloadDirectory}.tmp-${process.pid}`;
-
-  rmSync(stagingDirectory, { recursive: true, force: true });
-  mkdirSync(stagingDirectory, { recursive: true });
+  const indexTemporaryPath = `${outputPath}.tmp-${process.pid}`;
+  const temporaryPayloadPaths: string[] = [];
 
   try {
+    mkdirSync(payloadDirectory, { recursive: true });
     for (const payload of payloads) {
-      const payloadPath = join(stagingDirectory, payload.relativePath);
+      const payloadPath = join(payloadDirectory, payload.relativePath);
       mkdirSync(dirname(payloadPath), { recursive: true });
-      writeFileSync(payloadPath, payload.content, 'utf-8');
+      if (
+        existsSync(payloadPath)
+        && readFileSync(payloadPath, 'utf-8') === payload.content
+      ) {
+        continue;
+      }
+
+      const temporaryPath = `${payloadPath}.tmp-${process.pid}`;
+      temporaryPayloadPaths.push(temporaryPath);
+      writeFileSync(temporaryPath, payload.content, 'utf-8');
+      renameSync(temporaryPath, payloadPath);
     }
 
-    rmSync(payloadDirectory, { recursive: true, force: true });
-    renameSync(stagingDirectory, payloadDirectory);
+    rmSync(indexTemporaryPath, { force: true });
     writeFileSync(
-      outputPath,
+      indexTemporaryPath,
       JSON.stringify(catalogue, null, 2) + '\n',
       'utf-8',
     );
+    renameSync(indexTemporaryPath, outputPath);
   } catch (error) {
-    rmSync(stagingDirectory, { recursive: true, force: true });
+    rmSync(indexTemporaryPath, { force: true });
+    for (const temporaryPath of temporaryPayloadPaths) {
+      rmSync(temporaryPath, { force: true });
+    }
     throw error;
   }
 

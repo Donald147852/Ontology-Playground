@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createHash } from 'node:crypto';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { GalleryModal } from './GalleryModal';
 import { useAppStore } from '../store/appStore';
@@ -170,6 +170,17 @@ function mockFetchFailure(status = 404) {
   );
 }
 
+function deferredResponse(): {
+  promise: Promise<Response>;
+  resolve: (response: Response) => void;
+} {
+  let resolve!: (response: Response) => void;
+  const promise = new Promise<Response>((resolver) => {
+    resolve = resolver;
+  });
+  return { promise, resolve };
+}
+
 describe('GalleryModal', () => {
   const onClose = vi.fn();
 
@@ -332,6 +343,83 @@ describe('GalleryModal', () => {
     });
     expect(useAppStore.getState().currentOntology).toBe(initialOntology);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not let a slower selection override a newer selection', async () => {
+    const hospitalResponse = deferredResponse();
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = input.toString();
+      if (url.endsWith('/catalogue.json')) {
+        return new Response(JSON.stringify(fakeCatalogue), { status: 200 });
+      }
+      const entry = fakeCatalogue.entries.find((candidate) =>
+        url.endsWith(candidate.payloadUrl));
+      if (!entry) return new Response('not found', { status: 404 });
+      if (entry.id === 'community/drsmith/hospital-net') {
+        return hospitalResponse.promise;
+      }
+      return new Response(
+        JSON.stringify(fakePayloads[entry.id], null, 2) + '\n',
+        { status: 200 },
+      );
+    });
+    const user = userEvent.setup();
+    render(<GalleryModal onClose={onClose} />);
+    await screen.findByText('Hospital Network');
+
+    await user.click(screen.getAllByText('Load')[0]);
+    await user.click(screen.getByText('Load'));
+    await waitFor(() => {
+      expect(window.location.hash).toBe(
+        '#/catalogue/official/finance-ledger',
+      );
+    });
+
+    await act(async () => {
+      hospitalResponse.resolve(new Response(
+        JSON.stringify(
+          fakePayloads['community/drsmith/hospital-net'],
+          null,
+          2,
+        ) + '\n',
+        { status: 200 },
+      ));
+      await hospitalResponse.promise;
+    });
+    expect(window.location.hash).toBe(
+      '#/catalogue/official/finance-ledger',
+    );
+  });
+
+  it('does not navigate after the gallery is dismissed during a load', async () => {
+    const hospitalResponse = deferredResponse();
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = input.toString();
+      if (url.endsWith('/catalogue.json')) {
+        return new Response(JSON.stringify(fakeCatalogue), { status: 200 });
+      }
+      return hospitalResponse.promise;
+    });
+    const user = userEvent.setup();
+    render(<GalleryModal onClose={onClose} />);
+    await screen.findByText('Hospital Network');
+
+    await user.click(screen.getAllByText('Load')[0]);
+    await user.click(screen.getByText('Done'));
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      hospitalResponse.resolve(new Response(
+        JSON.stringify(
+          fakePayloads['community/drsmith/hospital-net'],
+          null,
+          2,
+        ) + '\n',
+        { status: 200 },
+      ));
+      await hospitalResponse.promise;
+    });
+    expect(window.location.hash).toBe('#/catalogue');
   });
 
   it('surfaces payload failures without loading an empty ontology', async () => {

@@ -160,6 +160,84 @@ describe('catalogue loader', () => {
     expect(payloadRequests).toBe(2);
   });
 
+  it('refreshes a stale index once when a deployed payload hash changed', async () => {
+    const oldContent = payloadContent();
+    const updatedContent = payloadContent({
+      ...payload,
+      ontology: {
+        ...payload.ontology,
+        name: 'Updated Ontology',
+      },
+    });
+    const oldCatalogue = createCatalogue(oldContent);
+    const updatedCatalogue = createCatalogue(updatedContent);
+    let indexRequests = 0;
+    let payloadRequests = 0;
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async (input) => {
+        const url = input.toString();
+        if (url.endsWith('/catalogue.json')) {
+          indexRequests++;
+          return response(JSON.stringify(
+            indexRequests === 1 ? oldCatalogue : updatedCatalogue,
+          ));
+        }
+        payloadRequests++;
+        return url.endsWith(oldCatalogue.entries[0].payloadUrl)
+          ? response('not found', 404)
+          : response(updatedContent);
+      },
+    );
+
+    const loaded = await loadCatalogueEntry(
+      'official/test',
+      '/playground/',
+    );
+
+    expect(loaded.ontology.name).toBe('Updated Ontology');
+    expect(indexRequests).toBe(2);
+    expect(payloadRequests).toBe(2);
+    expect(fetchMock.mock.calls[2][1]).toMatchObject({ cache: 'no-store' });
+  });
+
+  it('allows retry after a stale-index refresh fails', async () => {
+    const oldContent = payloadContent();
+    const updatedContent = payloadContent({
+      ...payload,
+      ontology: {
+        ...payload.ontology,
+        name: 'Recovered Ontology',
+      },
+    });
+    const oldCatalogue = createCatalogue(oldContent);
+    const updatedCatalogue = createCatalogue(updatedContent);
+    let indexRequests = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = input.toString();
+      if (url.endsWith('/catalogue.json')) {
+        indexRequests++;
+        if (indexRequests === 1) {
+          return response(JSON.stringify(oldCatalogue));
+        }
+        if (indexRequests === 2) return response('unavailable', 503);
+        return response(JSON.stringify(updatedCatalogue));
+      }
+      return url.endsWith(oldCatalogue.entries[0].payloadUrl)
+        ? response('not found', 404)
+        : response(updatedContent);
+    });
+
+    await expect(
+      loadCatalogueEntry('official/test', '/playground/'),
+    ).rejects.toThrow('Failed to load catalogue (503)');
+    await expect(
+      loadCatalogueEntry('official/test', '/playground/'),
+    ).resolves.toMatchObject({
+      ontology: { name: 'Recovered Ontology' },
+    });
+    expect(indexRequests).toBe(3);
+  });
+
   it('reports an index failure and allows a later retry', async () => {
     let indexRequests = 0;
     vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
@@ -254,8 +332,8 @@ describe('catalogue loader', () => {
   });
 
   it('does not request a payload for an unknown catalogue ID', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      response(JSON.stringify(createCatalogue())),
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async () => response(JSON.stringify(createCatalogue())),
     );
 
     await expect(
@@ -263,7 +341,8 @@ describe('catalogue loader', () => {
     ).rejects.toThrow(
       'Ontology "official/missing" not found in catalogue',
     );
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({ cache: 'no-store' });
   });
 
   it('rejects payload URLs that are not content-addressed for their entry', async () => {

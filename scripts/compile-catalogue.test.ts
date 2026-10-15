@@ -246,6 +246,37 @@ describe('catalogue compilation (end-to-end)', () => {
       expect(reparsed.ontology.relationships.length).toBe(payload.ontology.relationships.length);
     }
   });
+
+  it('retains previously published content-addressed payloads', () => {
+    const catalogueRoot = createTemporaryCatalogue();
+    const outputRoot = mkdtempSync(
+      join(tmpdir(), 'ontology-catalogue-output-test-'),
+    );
+    temporaryDirectories.push(outputRoot);
+    const outputPath = join(outputRoot, 'catalogue.json');
+    const legacyPayloadPath = join(
+      outputRoot,
+      'catalogue-payloads',
+      'official',
+      'legacy',
+      'previous-hash.json',
+    );
+    mkdirSync(dirname(legacyPayloadPath), { recursive: true });
+    writeFileSync(legacyPayloadPath, 'previous payload\n');
+    writeFileSync(outputPath, 'previous index\n');
+
+    runCatalogueCompiler(catalogueRoot, outputPath);
+
+    expect(readFileSync(legacyPayloadPath, 'utf-8')).toBe(
+      'previous payload\n',
+    );
+    expect(JSON.parse(readFileSync(outputPath, 'utf-8'))).toMatchObject({
+      schemaVersion: 2,
+      count: 0,
+      entries: [],
+    });
+    expect(existsSync(`${outputPath}.tmp-${process.pid}`)).toBe(false);
+  });
 });
 
 describe('catalogue directory discovery', () => {

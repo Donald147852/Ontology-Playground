@@ -293,7 +293,8 @@ describe('EmbedWidget', () => {
     await waitFor(() => {
       expect(screen.getByText(/not found in catalogue/)).toBeTruthy();
     });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({ cache: 'no-store' });
   });
 
   it('switches between Graph and RDF Source tabs', async () => {
