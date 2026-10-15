@@ -1031,6 +1031,11 @@ body {
   flex-direction: column;
 }
 
+.graph-legend--collapsed {
+  min-width: 0;
+  max-height: none;
+}
+
 .legend-toggle {
   display: flex;
   align-items: center;
@@ -1069,6 +1074,11 @@ body {
   overflow-y: auto;
 }
 
+.legend-more {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
 .legend-title {
   font-size: 12px;
   font-weight: 600;
@@ -1089,6 +1099,44 @@ body {
   width: 12px;
   height: 12px;
   border-radius: 50%;
+}
+
+.graph-export-error {
+  position: absolute;
+  z-index: 4;
+  bottom: 84px;
+  left: 24px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(440px, calc(100% - 48px));
+  padding: 10px 12px;
+  box-sizing: border-box;
+  background: color-mix(in srgb, var(--ms-red) 14%, var(--bg-elevated));
+  color: var(--text-primary);
+  border: 1px solid var(--ms-red);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.graph-export-error > span {
+  flex: 1;
+}
+
+.graph-export-error > button {
+  display: inline-flex;
+  padding: 4px;
+  background: transparent;
+  color: inherit;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.graph-export-error > button:hover {
+  background: color-mix(in srgb, var(--ms-red) 20%, transparent);
 }
 
 /* Right Sidebar Container */

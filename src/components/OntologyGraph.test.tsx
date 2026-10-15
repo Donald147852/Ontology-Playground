@@ -43,6 +43,14 @@ const graphMocks = vi.hoisted(() => {
       w: 40,
       h: 40,
     })),
+    boundingBox: vi.fn(() => ({
+      x1: 0,
+      y1: 0,
+      x2: 800,
+      y2: 600,
+      w: 800,
+      h: 600,
+    })),
   });
 
   const cy = {
@@ -63,7 +71,11 @@ const graphMocks = vi.hoisted(() => {
     height: vi.fn(() => 600),
     center: vi.fn(),
     fit: vi.fn(),
-    png: vi.fn(() => 'data:image/png;base64,test'),
+    png: vi.fn(async () => {
+      const bytes = new Uint8Array(67);
+      bytes.set([137, 80, 78, 71, 13, 10, 26, 10]);
+      return new Blob([bytes], { type: 'image/png' });
+    }),
   };
   const cytoscape = vi.fn(() => cy);
   return { addClass, connectedEdges, cy, cytoscape };
@@ -173,6 +185,7 @@ describe('OntologyGraph adaptive rendering', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useAppStore.getState().resetToDefault();
+    localStorage.removeItem('ontology-legend-collapsed');
     delete window.__ONTOLOGY_PREVIEW_CY__;
   });
 
@@ -187,6 +200,9 @@ describe('OntologyGraph adaptive rendering', () => {
     expect(config.layout.name).toBe('fcose');
     expect(config.layout.quality).toBe('proof');
     expect(
+      screen.getByRole('button', { name: 'Hide Entity Types legend' }),
+    ).toHaveAttribute('aria-expanded', 'true');
+    expect(
       screen.queryByRole('region', { name: 'Large ontology controls' }),
     ).not.toBeInTheDocument();
   });
@@ -199,6 +215,9 @@ describe('OntologyGraph adaptive rendering', () => {
     expect(
       screen.getByRole('region', { name: 'Large ontology controls' }),
     ).toHaveTextContent('Showing');
+    expect(
+      screen.queryByRole('button', { name: /Entity Types legend/ }),
+    ).not.toBeInTheDocument();
     await waitFor(() => {
       expect(graphMocks.cytoscape).toHaveBeenCalledTimes(1);
     });
@@ -647,5 +666,78 @@ describe('OntologyGraph adaptive rendering', () => {
     expect(
       screen.getByText('1 matching entity.').closest('.large-graph-status'),
     ).not.toBeNull();
+  });
+
+  it('downloads a validated PNG blob within explicit canvas limits', async () => {
+    const createObjectURL = vi.fn(() => 'blob:ontology-graph');
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: createObjectURL,
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      value: revokeObjectURL,
+    });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(() => {});
+
+    render(<OntologyGraph />);
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Download Graph as PNG' }),
+    );
+
+    await waitFor(() => {
+      expect(click).toHaveBeenCalledTimes(1);
+    });
+    expect(graphMocks.cy.png).toHaveBeenCalledWith({
+      maxWidth: 1_600,
+      maxHeight: 1_200,
+      full: true,
+      bg: '#1E1E1E',
+      output: 'blob-promise',
+    });
+    expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:ontology-graph');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+    click.mockRestore();
+  });
+
+  it('reports invalid PNG output instead of downloading an empty file', async () => {
+    graphMocks.cy.png.mockResolvedValueOnce(
+      new Blob([], { type: 'image/png' }),
+    );
+    const createObjectURL = vi.fn(() => 'blob:empty-graph');
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: createObjectURL,
+    });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(() => {});
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    render(<OntologyGraph />);
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Download Graph as PNG' }),
+    );
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Could not create a PNG in this browser.',
+    );
+    expect(createObjectURL).not.toHaveBeenCalled();
+    expect(click).not.toHaveBeenCalled();
+    expect(consoleError).toHaveBeenCalledWith(
+      'PNG export failed',
+      expect.any(Error),
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Dismiss PNG export error' }),
+    );
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+    click.mockRestore();
+    consoleError.mockRestore();
   });
 });

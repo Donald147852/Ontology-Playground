@@ -63,6 +63,18 @@ describe('GraphLegend', () => {
     expect(screen.getByText('7')).toBeInTheDocument();
   });
 
+  it('retains the total count when the visible legend list is capped', () => {
+    localStorage.setItem(STORAGE_KEY, 'false');
+
+    render(
+      <GraphLegend entityTypes={makeEntityTypes(3)} hiddenCount={97} />,
+    );
+
+    expect(screen.getByText('100')).toBeInTheDocument();
+    expect(screen.getByText('+ 97 more visible in the graph'))
+      .toBeInTheDocument();
+  });
+
   it('starts collapsed for an ontology large enough to bury the graph', () => {
     render(<GraphLegend entityTypes={makeEntityTypes(LEGEND_AUTO_COLLAPSE_THRESHOLD + 1)} />);
 

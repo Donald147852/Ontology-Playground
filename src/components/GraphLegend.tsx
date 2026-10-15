@@ -28,7 +28,8 @@ function defaultCollapsed(entityTypeCount: number): boolean {
 }
 
 interface GraphLegendProps {
-  entityTypes: EntityType[];
+  entityTypes: readonly EntityType[];
+  hiddenCount?: number;
 }
 
 /**
@@ -36,8 +37,11 @@ interface GraphLegendProps {
  * out of the way of the nodes it sits on top of, remembering the choice across
  * sessions.
  */
-export function GraphLegend({ entityTypes }: GraphLegendProps) {
-  const entityTypeCount = entityTypes.length;
+export function GraphLegend({
+  entityTypes,
+  hiddenCount = 0,
+}: GraphLegendProps) {
+  const entityTypeCount = entityTypes.length + hiddenCount;
   const [collapsed, setCollapsed] = useState(() => defaultCollapsed(entityTypeCount));
 
   // Loading a much larger ontology re-applies the size heuristic, so importing
@@ -82,6 +86,11 @@ export function GraphLegend({ entityTypes }: GraphLegendProps) {
               <span>{entity.icon} {entity.name}</span>
             </div>
           ))}
+          {hiddenCount > 0 && (
+            <div className="legend-item legend-more">
+              + {hiddenCount.toLocaleString()} more visible in the graph
+            </div>
+          )}
         </div>
       )}
     </div>

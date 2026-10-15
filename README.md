@@ -67,7 +67,10 @@ that node. Expansion keeps existing entities and the viewport anchored while
 placing newly revealed hierarchy branches to avoid crossings where possible.
 The Semantic overview can hide the selected entity's shown neighborhood again.
 When its 180-entity view limit is full it explains which neighbors remain
-hidden and asks you to hide a shown neighborhood before expanding another. All
+hidden and asks you to hide a shown neighborhood before expanding another. The
+entity legend can be collapsed and automatically starts collapsed when it would
+obscure a larger graph. PNG downloads export the currently visible graph within
+browser-safe image limits and report failures instead of saving an empty file. All
 node-specific expansions and the current selection/focus clear when the detail
 slider changes, so each hop level starts as an unfocused hierarchy projection
 while independent query and path highlights remain visible. Clicking anywhere
