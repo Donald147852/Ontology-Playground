@@ -40,6 +40,13 @@ const AUTHORED_RDF = `<?xml version="1.0" encoding="UTF-8"?>
   </owl:DatatypeProperty>
 </rdf:RDF>`;
 
+const COLLIDING_RDF = `<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns:owl="http://www.w3.org/2002/07/owl#">
+  <owl:Class rdf:about="https://one.example/Thing"/>
+  <owl:Class rdf:about="https://two.example/Thing"/>
+</rdf:RDF>`;
+
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
@@ -142,6 +149,23 @@ describe('RDF validation profiles', () => {
       filePath,
       'official',
     ).errors).not.toHaveLength(0);
+  });
+
+  it('rejects source identifier collisions before parser normalization', () => {
+    const root = createTemporaryRoot();
+    const filePath = writeEntry(
+      root,
+      'external/example/standard',
+      COLLIDING_RDF,
+      externalMetadata(),
+    );
+
+    expect(validateRdfFile(
+      filePath,
+      'external',
+    ).errors).toContainEqual(expect.objectContaining({
+      code: 'source-graph-id-collision',
+    }));
   });
 
   it('validates the real Brick graph under the external profile', () => {
@@ -263,6 +287,18 @@ describe('catalogue profile discovery', () => {
       join(root, 'catalogue'),
       outputPath,
     )).toThrow('Catalogue compilation failed');
+
+    writeFileSync(
+      join(dirname(filePath), 'metadata.json'),
+      JSON.stringify(externalMetadata()),
+    );
+    writeFileSync(filePath, COLLIDING_RDF);
+
+    expect(runValidationCli([], root)).toBe(1);
+    expect(() => runCatalogueCompiler(
+      join(root, 'catalogue'),
+      outputPath,
+    )).toThrow('Catalogue compilation failed');
   });
 
   it('infers the external profile for explicit catalogue paths', () => {
@@ -278,5 +314,42 @@ describe('catalogue profile discovery', () => {
     expect(runValidationCli([
       filePath,
     ], root)).toBe(0);
+  });
+
+  it('rejects profile overrides for catalogue paths', () => {
+    const root = createTemporaryRoot();
+    const filePath = writeEntry(
+      root,
+      'external/example/standard',
+      EXTERNAL_RDF,
+      externalMetadata(),
+    );
+    silenceConsole();
+
+    expect(runValidationCli([
+      '--profile',
+      'external',
+      filePath,
+    ], root)).toBe(1);
+  });
+
+  it('requires metadata for explicitly validated catalogue entries', () => {
+    const root = createTemporaryRoot();
+    const filePath = writeEntry(
+      root,
+      'official/official-entry',
+      AUTHORED_RDF,
+      {
+        name: 'Official',
+        description: 'Official authored example.',
+        category: 'general',
+      },
+    );
+    rmSync(join(dirname(filePath), 'metadata.json'));
+    silenceConsole();
+
+    expect(runValidationCli([
+      filePath,
+    ], root)).toBe(1);
   });
 });

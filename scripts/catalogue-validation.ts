@@ -55,6 +55,9 @@ export const DEFAULT_VALIDATION_LIMITS: ValidationLimits = {
 
 const FABRIC_NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
 const ACTIVE_XML_PATTERN = /<!\s*(?:DOCTYPE|ENTITY)\b/i;
+const RDF_NS = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#';
+const RDFS_NS = 'http://www.w3.org/2000/01/rdf-schema#';
+const OWL_NS = 'http://www.w3.org/2002/07/owl#';
 const VALID_CATEGORIES = new Set([
   'retail',
   'healthcare',
@@ -71,28 +74,30 @@ const VALID_CATEGORIES = new Set([
   'fibo',
 ]);
 
-const SOURCE_ONLY_PATTERNS = [
+const SOURCE_ONLY_TERMS = [
   {
     label: 'OWL restrictions',
-    pattern: /<(?:[A-Za-z_][\w.-]*:)?Restriction\b/gi,
+    terms: ['Restriction'],
   },
   {
     label: 'OWL set expressions',
-    pattern:
-      /<(?:[A-Za-z_][\w.-]*:)?(?:unionOf|intersectionOf|complementOf|oneOf)\b/gi,
+    terms: ['unionOf', 'intersectionOf', 'complementOf', 'oneOf'],
   },
   {
     label: 'OWL property chains',
-    pattern: /<(?:[A-Za-z_][\w.-]*:)?propertyChainAxiom\b/gi,
+    terms: ['propertyChainAxiom'],
   },
   {
     label: 'OWL keys',
-    pattern: /<(?:[A-Za-z_][\w.-]*:)?hasKey\b/gi,
+    terms: ['hasKey'],
   },
   {
     label: 'OWL disjointness axioms',
-    pattern:
-      /<(?:[A-Za-z_][\w.-]*:)?(?:disjointWith|AllDisjointClasses|AllDisjointProperties)\b/gi,
+    terms: [
+      'disjointWith',
+      'AllDisjointClasses',
+      'AllDisjointProperties',
+    ],
   },
 ] as const;
 
@@ -142,10 +147,6 @@ function isSafeHttpsUrl(value: string): boolean {
   } catch {
     return false;
   }
-}
-
-function countMatches(source: string, pattern: RegExp): number {
-  return Array.from(source.matchAll(pattern)).length;
 }
 
 function profileForTier(tier: CatalogueTier): ValidationProfile {
@@ -252,6 +253,321 @@ export function validateCatalogueMetadata(
   return report;
 }
 
+function getRdfAttribute(
+  element: Element,
+  localName: string,
+): string | null {
+  return element.getAttributeNS(RDF_NS, localName)
+    || element.getAttribute(`rdf:${localName}`);
+}
+
+type SourceTypeIndex = ReadonlyMap<string, readonly Element[]>;
+
+function indexSourceTypes(document: Document): SourceTypeIndex {
+  const elementsByType = new Map<string, Element[]>();
+  const descriptions = document.getElementsByTagNameNS(
+    RDF_NS,
+    'Description',
+  );
+
+  for (let index = 0; index < descriptions.length; index++) {
+    const description = descriptions[index];
+    const indexedTypes = new Set<string>();
+    for (
+      let childIndex = 0;
+      childIndex < description.children.length;
+      childIndex++
+    ) {
+      const child = description.children[childIndex];
+      const typeIri = getRdfAttribute(child, 'resource');
+      if (
+        child.namespaceURI === RDF_NS
+        && child.localName === 'type'
+        && typeIri
+        && !indexedTypes.has(typeIri)
+      ) {
+        const elements = elementsByType.get(typeIri) ?? [];
+        elements.push(description);
+        elementsByType.set(typeIri, elements);
+        indexedTypes.add(typeIri);
+      }
+    }
+  }
+
+  return elementsByType;
+}
+
+function getTypedSourceElements(
+  document: Document,
+  typeIndex: SourceTypeIndex,
+  namespace: string,
+  localName: string,
+): Element[] {
+  return [
+    ...Array.from(document.getElementsByTagNameNS(namespace, localName)),
+    ...(typeIndex.get(`${namespace}${localName}`) ?? []),
+  ];
+}
+
+function getDirectChild(
+  parent: Element,
+  localName: string,
+  namespace?: string,
+): Element | undefined {
+  return Array.from(parent.children).find(
+    (child) => child.localName === localName
+      && (namespace === undefined || child.namespaceURI === namespace),
+  );
+}
+
+function getDirectChildText(
+  parent: Element,
+  localName: string,
+): string {
+  return getDirectChild(parent, localName)?.textContent?.trim() ?? '';
+}
+
+function getDirectChildResource(
+  parent: Element,
+  localName: string,
+  namespace?: string,
+): string {
+  const child = getDirectChild(parent, localName, namespace);
+  return child ? getRdfAttribute(child, 'resource') ?? '' : '';
+}
+
+function localNameFromIri(iri: string): string {
+  const hashIndex = iri.lastIndexOf('#');
+  if (hashIndex >= 0) return iri.slice(hashIndex + 1);
+  const slashIndex = iri.lastIndexOf('/');
+  if (slashIndex >= 0) return iri.slice(slashIndex + 1);
+  return iri;
+}
+
+function normalizedGraphId(iri: string): string {
+  const localName = localNameFromIri(iri);
+  return localName
+    ? `${localName.charAt(0).toLowerCase()}${localName.slice(1)}`
+    : '';
+}
+
+function countOwlTerms(
+  document: Document,
+  typeIndex: SourceTypeIndex,
+  terms: readonly string[],
+): number {
+  return terms.reduce((count, term) => {
+    const isTypedNode = /^[A-Z]/.test(term);
+    return count + (
+      isTypedNode
+        ? getTypedSourceElements(
+            document,
+            typeIndex,
+            OWL_NS,
+            term,
+          ).length
+        : document.getElementsByTagNameNS(OWL_NS, term).length
+    );
+  }, 0);
+}
+
+interface SourceGraphAnalysis extends ValidationReport {
+  anonymousClasses: number;
+  skippedObjectProperties: number;
+}
+
+function summarizeValues(values: readonly string[]): string {
+  const examples = values.slice(0, 3).map((value) => `"${value}"`);
+  return values.length > examples.length
+    ? `${examples.join(', ')}, and ${values.length - examples.length} more`
+    : examples.join(', ');
+}
+
+function analyzeSourceGraph(
+  document: Document,
+  typeIndex: SourceTypeIndex,
+): SourceGraphAnalysis {
+  const report: SourceGraphAnalysis = {
+    errors: [],
+    warnings: [],
+    anonymousClasses: 0,
+    skippedObjectProperties: 0,
+  };
+  const classElements = getTypedSourceElements(
+    document,
+    typeIndex,
+    OWL_NS,
+    'Class',
+  );
+  const objectPropertyElements = getTypedSourceElements(
+    document,
+    typeIndex,
+    OWL_NS,
+    'ObjectProperty',
+  );
+  const objectPropertyIris = new Set(
+    objectPropertyElements
+      .map((element) => getRdfAttribute(element, 'about'))
+      .filter((iri): iri is string => Boolean(iri)),
+  );
+  const graphIdOwners = new Map<string, string>();
+  const collisions: string[] = [];
+  const classIris = new Set<string>();
+  const missingClassIdentifiers: string[] = [];
+
+  for (const element of classElements) {
+    const iri = getRdfAttribute(element, 'about') ?? '';
+    if (!iri) {
+      report.anonymousClasses++;
+      continue;
+    }
+
+    const superClass = getDirectChildResource(
+      element,
+      'subClassOf',
+      RDFS_NS,
+    );
+    const relatedProperty = getDirectChildResource(element, 'relation');
+    if (
+      superClass === `${RDF_NS}Statement`
+      && objectPropertyIris.has(relatedProperty)
+    ) {
+      continue;
+    }
+
+    classIris.add(iri);
+    const graphId = normalizedGraphId(iri);
+    if (!graphId) {
+      missingClassIdentifiers.push(iri);
+      continue;
+    }
+
+    const existing = graphIdOwners.get(graphId);
+    if (existing && existing !== iri) {
+      collisions.push(
+        `${graphId}: ${existing} and ${iri}`,
+      );
+    } else {
+      graphIdOwners.set(graphId, iri);
+    }
+  }
+
+  const incompleteRelationships: string[] = [];
+  const unresolvedRelationships: string[] = [];
+  const duplicateRelationshipIris: string[] = [];
+  const missingRelationshipIdentifiers: string[] = [];
+  const renderedRelationshipIris = new Set<string>();
+
+  for (const element of objectPropertyElements) {
+    const iri = getRdfAttribute(element, 'about') ?? '';
+    const explicitFromElement = getDirectChild(element, 'fromEntityId');
+    const explicitToElement = getDirectChild(element, 'toEntityId');
+    const explicitFrom = getDirectChildText(element, 'fromEntityId');
+    const explicitTo = getDirectChildText(element, 'toEntityId');
+    const domainIri = getDirectChildResource(
+      element,
+      'domain',
+      RDFS_NS,
+    );
+    const rangeIri = getDirectChildResource(
+      element,
+      'range',
+      RDFS_NS,
+    );
+    const hasSource = Boolean(explicitFrom || domainIri);
+    const hasTarget = Boolean(explicitTo || rangeIri);
+
+    if (!hasSource && !hasTarget) {
+      report.skippedObjectProperties++;
+      continue;
+    }
+    if (!hasSource || !hasTarget) {
+      if (explicitFromElement || explicitToElement) {
+        incompleteRelationships.push(iri || 'anonymous object property');
+      } else {
+        report.skippedObjectProperties++;
+      }
+      continue;
+    }
+    if (!iri) {
+      missingRelationshipIdentifiers.push('anonymous object property');
+      continue;
+    }
+
+    if (!explicitFrom && domainIri && !classIris.has(domainIri)) {
+      unresolvedRelationships.push(`${iri} -> ${domainIri}`);
+    }
+    if (!explicitTo && rangeIri && !classIris.has(rangeIri)) {
+      unresolvedRelationships.push(`${iri} -> ${rangeIri}`);
+    }
+
+    if (renderedRelationshipIris.has(iri)) {
+      duplicateRelationshipIris.push(iri);
+      continue;
+    }
+    renderedRelationshipIris.add(iri);
+
+    const graphId = normalizedGraphId(iri);
+    if (!graphId) {
+      missingRelationshipIdentifiers.push(iri);
+      continue;
+    }
+    const existing = graphIdOwners.get(graphId);
+    if (existing && existing !== iri) {
+      collisions.push(
+        `${graphId}: ${existing} and ${iri}`,
+      );
+    } else {
+      graphIdOwners.set(graphId, iri);
+    }
+  }
+
+  if (missingClassIdentifiers.length > 0) {
+    report.errors.push(issue(
+      'error',
+      'source-class-identifier',
+      `${missingClassIdentifiers.length.toLocaleString()} OWL classes lack a stable source identifier (${summarizeValues(missingClassIdentifiers)}).`,
+    ));
+  }
+  if (missingRelationshipIdentifiers.length > 0) {
+    report.errors.push(issue(
+      'error',
+      'source-relationship-identifier',
+      `${missingRelationshipIdentifiers.length.toLocaleString()} visual relationships lack a stable source identifier (${summarizeValues(missingRelationshipIdentifiers)}).`,
+    ));
+  }
+  if (collisions.length > 0) {
+    report.errors.push(issue(
+      'error',
+      'source-graph-id-collision',
+      `${collisions.length.toLocaleString()} source identifier collisions would require order-dependent graph IDs (${summarizeValues(collisions)}).`,
+    ));
+  }
+  if (incompleteRelationships.length > 0) {
+    report.errors.push(issue(
+      'error',
+      'source-relationship-endpoints',
+      `${incompleteRelationships.length.toLocaleString()} OWL object properties declare only one visual endpoint (${summarizeValues(incompleteRelationships)}).`,
+    ));
+  }
+  if (unresolvedRelationships.length > 0) {
+    report.errors.push(issue(
+      'error',
+      'source-relationship-target',
+      `${unresolvedRelationships.length.toLocaleString()} OWL object property endpoints reference classes outside the visual graph (${summarizeValues(unresolvedRelationships)}).`,
+    ));
+  }
+  if (duplicateRelationshipIris.length > 0) {
+    report.errors.push(issue(
+      'error',
+      'source-relationship-duplicate',
+      `${duplicateRelationshipIris.length.toLocaleString()} visual relationships are declared more than once (${summarizeValues(duplicateRelationshipIris)}).`,
+    ));
+  }
+
+  return report;
+}
+
 export function validateRdfSource(
   sourceBytes: Uint8Array,
   limits: ValidationLimits = DEFAULT_VALIDATION_LIMITS,
@@ -289,10 +605,28 @@ export function validateRdfSource(
     return report;
   }
 
-  const importCount = countMatches(
+  if (!source.trimStart().startsWith('<')) {
+    return report;
+  }
+
+  const document = new DOMParser().parseFromString(
     source,
-    /<(?:[A-Za-z_][\w.-]*:)?imports\b/gi,
+    'application/xml',
   );
+  const parseError = document.querySelector('parsererror');
+  if (parseError) {
+    report.errors.push(issue(
+      'error',
+      'source-xml',
+      `Malformed XML: ${parseError.textContent?.trim() || 'parse error'}`,
+    ));
+    return report;
+  }
+
+  const importCount = document.getElementsByTagNameNS(
+    OWL_NS,
+    'imports',
+  ).length;
   if (importCount > limits.maxImports) {
     report.errors.push(issue(
       'error',
@@ -301,11 +635,16 @@ export function validateRdfSource(
     ));
   }
 
+  const typeIndex = indexSourceTypes(document);
+  const graphAnalysis = analyzeSourceGraph(document, typeIndex);
+  report.errors.push(...graphAnalysis.errors);
+  report.warnings.push(...graphAnalysis.warnings);
+
   const sourceOnlySemantics: { label: string; count: number }[] =
-    SOURCE_ONLY_PATTERNS
-    .map(({ label, pattern }) => ({
+    SOURCE_ONLY_TERMS
+    .map(({ label, terms }) => ({
       label,
-      count: countMatches(source, pattern),
+      count: countOwlTerms(document, typeIndex, terms),
     }))
     .filter(({ count }) => count > 0);
 
@@ -313,6 +652,18 @@ export function validateRdfSource(
     sourceOnlySemantics.push({
       label: 'OWL imports',
       count: importCount,
+    });
+  }
+  if (graphAnalysis.skippedObjectProperties > 0) {
+    sourceOnlySemantics.push({
+      label: 'unmapped OWL object properties',
+      count: graphAnalysis.skippedObjectProperties,
+    });
+  }
+  if (graphAnalysis.anonymousClasses > 0) {
+    sourceOnlySemantics.push({
+      label: 'anonymous OWL class expressions',
+      count: graphAnalysis.anonymousClasses,
     });
   }
 
@@ -334,6 +685,9 @@ function validateResourceLimits(
   const report = emptyReport();
   const propertyCount = ontology.entityTypes.reduce(
     (sum, entity) => sum + entity.properties.length,
+    0,
+  ) + ontology.relationships.reduce(
+    (sum, relationship) => sum + (relationship.attributes?.length ?? 0),
     0,
   );
   const checks = [

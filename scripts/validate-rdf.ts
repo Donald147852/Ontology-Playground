@@ -13,6 +13,7 @@ import {
 } from 'node:fs';
 import {
   dirname,
+  isAbsolute,
   join,
   relative,
   resolve,
@@ -38,6 +39,7 @@ import {
 import {
   CatalogueDiscoveryError,
   discoverCatalogueSources,
+  type DiscoveredCatalogueSource,
 } from './compile-catalogue.js';
 
 const dom = new JSDOM('');
@@ -158,27 +160,21 @@ function parseArguments(args: string[]): ParsedArguments {
   return parsed;
 }
 
-function tierForFile(
-  filePath: string,
-  cwd: string,
+function tierForStandaloneFile(
   profile?: CliProfile,
 ): CatalogueTier {
   if (profile !== undefined) {
     return profile === 'authored' ? 'official' : profile;
   }
 
-  const relativePath = relative(cwd, filePath).split(sep).join('/');
-  const match = /^catalogue\/(official|community|external)\//.exec(
-    relativePath,
-  );
-  if (
-    match?.[1] === 'official'
-    || match?.[1] === 'community'
-    || match?.[1] === 'external'
-  ) {
-    return match[1];
-  }
   return 'official';
+}
+
+function isPathWithin(root: string, path: string): boolean {
+  const relativePath = relative(root, path);
+  return relativePath !== '..'
+    && !relativePath.startsWith(`..${sep}`)
+    && !isAbsolute(relativePath);
 }
 
 function findAuthoredRdfFiles(directory: string): string[] {
@@ -239,6 +235,29 @@ function metadataReportForFile(
   }
 }
 
+function validateCatalogueSource(
+  source: DiscoveredCatalogueSource,
+): ValidationReport {
+  try {
+    const metadata = JSON.parse(decodeUtf8(
+      source.readMetadata(),
+      source.metadataPath,
+    )) as unknown;
+    return mergeValidationReports(
+      validateCatalogueMetadata(metadata, source.tier),
+      validateRdfBytes(source.readRdf(), source.tier),
+    );
+  } catch (error) {
+    if (error instanceof CatalogueDiscoveryError) throw error;
+    return {
+      errors: [
+        validationIssue('catalogue-read', (error as Error).message),
+      ],
+      warnings: [],
+    };
+  }
+}
+
 function printResult(
   label: string,
   report: ValidationReport,
@@ -284,18 +303,67 @@ export function runValidationCli(
   let failed = 0;
 
   if (parsedArguments.files.length > 0) {
-    for (const argument of parsedArguments.files) {
-      const filePath = resolve(cwd, argument);
-      const tier = tierForFile(
-        filePath,
-        cwd,
-        parsedArguments.profile,
-      );
-      const rdfReport = validateRdfFile(filePath, tier);
-      const metadataReport = metadataReportForFile(filePath, tier);
-      const report = metadataReport === undefined
-        ? rdfReport
-        : mergeValidationReports(metadataReport, rdfReport);
+    const filePaths = parsedArguments.files.map(
+      (argument) => resolve(cwd, argument),
+    );
+    const catalogueRoot = join(cwd, 'catalogue');
+    let catalogueDiscovery:
+      | ReturnType<typeof discoverCatalogueSources>
+      | undefined;
+
+    if (filePaths.some((filePath) =>
+      isPathWithin(catalogueRoot, filePath))) {
+      try {
+        catalogueDiscovery = discoverCatalogueSources(catalogueRoot);
+      } catch (error) {
+        console.error((error as Error).message);
+        return 1;
+      }
+    }
+
+    for (const filePath of filePaths) {
+      let report: ValidationReport;
+      if (isPathWithin(catalogueRoot, filePath)) {
+        if (parsedArguments.profile !== undefined) {
+          report = {
+            errors: [validationIssue(
+              'catalogue-profile-override',
+              'Catalogue paths select their validation profile automatically; --profile is only available for standalone files.',
+            )],
+            warnings: [],
+          };
+        } else if (
+          catalogueDiscovery
+          && catalogueDiscovery.errors.length > 0
+        ) {
+          report = {
+            errors: catalogueDiscovery.errors.map((message) =>
+              validationIssue('catalogue-discovery', message)),
+            warnings: [],
+          };
+        } else {
+          const source = catalogueDiscovery?.sources.find(
+            (candidate) => resolve(candidate.rdfPath) === filePath,
+          );
+          report = source
+            ? validateCatalogueSource(source)
+            : {
+                errors: [validationIssue(
+                  'catalogue-source',
+                  `${filePath}: file is not a discoverable catalogue RDF source.`,
+                )],
+                warnings: [],
+              };
+        }
+      } else {
+        const tier = tierForStandaloneFile(parsedArguments.profile);
+        const rdfReport = validateRdfFile(filePath, tier);
+        const metadataReport = metadataReportForFile(filePath, tier);
+        report = metadataReport === undefined
+          ? rdfReport
+          : mergeValidationReports(metadataReport, rdfReport);
+      }
+
       if (!printResult(relative(cwd, filePath) || filePath, report)) {
         failed++;
       }
@@ -344,25 +412,7 @@ export function runValidationCli(
       }
 
       for (const source of discovery.sources) {
-        let report: ValidationReport;
-        try {
-          const metadata = JSON.parse(decodeUtf8(
-            source.readMetadata(),
-            source.metadataPath,
-          )) as unknown;
-          report = mergeValidationReports(
-            validateCatalogueMetadata(metadata, source.tier),
-            validateRdfBytes(source.readRdf(), source.tier),
-          );
-        } catch (error) {
-          if (error instanceof CatalogueDiscoveryError) throw error;
-          report = {
-            errors: [
-              validationIssue('catalogue-read', (error as Error).message),
-            ],
-            warnings: [],
-          };
-        }
+        const report = validateCatalogueSource(source);
         if (!printResult(relative(cwd, source.rdfPath), report)) {
           failed++;
         }

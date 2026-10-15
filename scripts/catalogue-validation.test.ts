@@ -119,6 +119,31 @@ describe('tier-aware ontology validation', () => {
     }));
   });
 
+  it('counts relationship attributes toward the property limit', () => {
+    const ontology = ontologyFixture();
+    ontology.relationships[0].attributes = Array.from(
+      { length: 11 },
+      (_, index) => ({
+        name: `attribute-${index}`,
+        type: 'string',
+      }),
+    );
+
+    expect(validateOntologyForTier(
+      ontology,
+      'external',
+      {
+        maxSourceBytes: 1_000,
+        maxEntities: 10,
+        maxRelationships: 10,
+        maxProperties: 10,
+        maxImports: 10,
+      },
+    ).errors).toContainEqual(expect.objectContaining({
+      code: 'resource-properties',
+    }));
+  });
+
   it('accepts a Brick-sized external model with aggregated warnings', () => {
     const entityCount = 1_518;
     const relationshipCount = 1_736;
@@ -197,7 +222,11 @@ describe('RDF source safety', () => {
   });
 
   it('enforces import limits without dereferencing imports', () => {
-    const source = `<rdf:RDF>${'<owl:imports rdf:resource="https://example.org/ontology"/>'.repeat(2)}</rdf:RDF>`;
+    const source = `<rdf:RDF
+      xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+      xmlns:owl="http://www.w3.org/2002/07/owl#">
+      ${'<owl:imports rdf:resource="https://example.org/ontology"/>'.repeat(2)}
+    </rdf:RDF>`;
     const report = validateRdfSource(
       new TextEncoder().encode(source),
       {
@@ -214,10 +243,106 @@ describe('RDF source safety', () => {
     }));
   });
 
+  it('counts OWL imports by namespace instead of QName spelling', () => {
+    const source = `<rdf:RDF
+      xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+      xmlns:é="http://www.w3.org/2002/07/owl#">
+      <é:imports rdf:resource="https://example.org/one"/>
+      <é:imports rdf:resource="https://example.org/two"/>
+    </rdf:RDF>`;
+    const report = validateRdfSource(
+      new TextEncoder().encode(source),
+      {
+        maxSourceBytes: 10_000,
+        maxEntities: 10,
+        maxRelationships: 10,
+        maxProperties: 10,
+        maxImports: 1,
+      },
+    );
+
+    expect(report.errors).toContainEqual(expect.objectContaining({
+      code: 'resource-imports',
+    }));
+  });
+
+  it('does not count same-named elements from unrelated namespaces', () => {
+    const source = `<rdf:RDF
+      xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+      xmlns:custom="https://example.org/custom#">
+      ${'<custom:imports rdf:resource="https://example.org/ontology"/>'.repeat(2)}
+    </rdf:RDF>`;
+    const report = validateRdfSource(
+      new TextEncoder().encode(source),
+      {
+        maxSourceBytes: 10_000,
+        maxEntities: 10,
+        maxRelationships: 10,
+        maxProperties: 10,
+        maxImports: 1,
+      },
+    );
+
+    expect(report.errors).toHaveLength(0);
+    expect(report.warnings).toHaveLength(0);
+  });
+
+  it('rejects source IRIs that normalize to order-dependent graph IDs', () => {
+    const source = `<rdf:RDF
+      xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+      xmlns:owl="http://www.w3.org/2002/07/owl#">
+      <owl:Class rdf:about="https://one.example/Thing"/>
+      <owl:Class rdf:about="https://two.example/Thing"/>
+    </rdf:RDF>`;
+
+    expect(validateRdfSource(
+      new TextEncoder().encode(source),
+    ).errors).toContainEqual(expect.objectContaining({
+      code: 'source-graph-id-collision',
+    }));
+  });
+
+  it('rejects object properties that declare only one endpoint', () => {
+    const source = `<rdf:RDF
+      xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+      xmlns:owl="http://www.w3.org/2002/07/owl#"
+      xmlns:ont="https://example.org/ontology/">
+      <owl:Class rdf:about="https://example.org/Source"/>
+      <owl:ObjectProperty rdf:about="https://example.org/incomplete">
+        <ont:fromEntityId>source</ont:fromEntityId>
+      </owl:ObjectProperty>
+    </rdf:RDF>`;
+
+    expect(validateRdfSource(
+      new TextEncoder().encode(source),
+    ).errors).toContainEqual(expect.objectContaining({
+      code: 'source-relationship-endpoints',
+    }));
+  });
+
+  it('warns once for object properties with no visual endpoints', () => {
+    const source = `<rdf:RDF
+      xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+      xmlns:owl="http://www.w3.org/2002/07/owl#">
+      ${'<owl:ObjectProperty rdf:about="https://example.org/unmapped"/>'.repeat(10)}
+    </rdf:RDF>`;
+    const report = validateRdfSource(new TextEncoder().encode(source));
+
+    expect(report.errors).toHaveLength(0);
+    expect(report.warnings).toEqual([expect.objectContaining({
+      code: 'source-only-semantics',
+      message: expect.stringContaining('unmapped OWL object properties (10)'),
+    })]);
+  });
+
   it('summarizes repeated unsupported semantics once', () => {
     const restrictions = '<owl:Restriction/>'.repeat(1_000);
     const report = validateRdfSource(
-      new TextEncoder().encode(`<rdf:RDF>${restrictions}</rdf:RDF>`),
+      new TextEncoder().encode(`<rdf:RDF
+        xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+        xmlns:owl="http://www.w3.org/2002/07/owl#">
+        ${restrictions}
+      </rdf:RDF>`),
     );
 
     expect(report.errors).toHaveLength(0);
