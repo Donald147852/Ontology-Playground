@@ -1,4 +1,5 @@
 import {
+  linkSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
@@ -365,6 +366,39 @@ describe('catalogue profile discovery', () => {
       ], root)).toBe(0);
     },
   );
+
+  it('binds hard-link aliases to the discovered catalogue tier', () => {
+    const root = createTemporaryRoot();
+    const filePath = writeEntry(
+      root,
+      'external/example/standard',
+      EXTERNAL_RDF,
+      externalMetadata(),
+    );
+    const hardLinkPath = join(root, 'hard-linked-ontology.rdf');
+    linkSync(filePath, hardLinkPath);
+    writeFileSync(
+      join(root, 'metadata.json'),
+      JSON.stringify(externalMetadata()),
+    );
+    const output: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((message?: unknown) => {
+      output.push(String(message));
+    });
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    expect(runValidationCli([
+      '--profile',
+      'external',
+      hardLinkPath,
+    ], root)).toBe(1);
+    expect(output.some((line) =>
+      line.includes('catalogue-profile-override'))).toBe(true);
+
+    expect(runValidationCli([
+      hardLinkPath,
+    ], root)).toBe(0);
+  });
 
   it('requires metadata for explicitly validated catalogue entries', () => {
     const root = createTemporaryRoot();

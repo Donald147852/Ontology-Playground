@@ -20,6 +20,7 @@ import {
   readdirSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import type { Stats } from 'node:fs';
@@ -87,6 +88,10 @@ export interface DiscoveredCatalogueSource {
 export interface CatalogueSourceDiscovery {
   sources: DiscoveredCatalogueSource[];
   errors: string[];
+  findSourceByRdfFile: (
+    path: string,
+  ) => DiscoveredCatalogueSource | undefined;
+  matchesRdfFile: (path: string) => boolean;
 }
 
 export interface CatalogueCompilerDependencies {
@@ -376,6 +381,11 @@ export function discoverCatalogueSources(
   const sources: DiscoveredCatalogueSource[] = [];
   const errors: string[] = [];
   const seenIds = new Set<string>();
+  const rdfFileIdentities: CataloguePathIdentity[] = [];
+  const sourceIdentities: {
+    identity: CataloguePathIdentity;
+    source: DiscoveredCatalogueSource;
+  }[] = [];
 
   validateCatalogueRoot(catalogueDir);
 
@@ -393,6 +403,14 @@ export function discoverCatalogueSources(
 
     for (const directory of ontologyDirs) {
       const discoveredFiles = discoverOntologyFiles(directory);
+      for (const rdfFile of discoveredFiles.rdfFiles) {
+        const rdfIdentity = discoveredFiles.fileIdentities.get(
+          join(directory, rdfFile),
+        );
+        if (rdfIdentity) {
+          rdfFileIdentities.push(rdfIdentity);
+        }
+      }
       if (discoveredFiles.rdfFiles.length !== 1) {
         errors.push(
           `${directory}: expected exactly one .rdf or .owl file, found ${discoveredFiles.rdfFiles.length}`,
@@ -428,7 +446,7 @@ export function discoverCatalogueSources(
       }
       seenIds.add(entryId);
 
-      sources.push({
+      const source: DiscoveredCatalogueSource = {
         tier,
         directory,
         entryId,
@@ -448,11 +466,50 @@ export function discoverCatalogueSources(
           rdfIdentity,
           dependencies,
         ),
-      });
+      };
+      sources.push(source);
+      sourceIdentities.push({ identity: rdfIdentity, source });
     }
   }
 
-  return { sources, errors };
+  const identityForPath = (
+    path: string,
+  ): CataloguePathIdentity | undefined => {
+    try {
+      const stat = statSync(path);
+      return stat.isFile() ? toPathIdentity(stat) : undefined;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return undefined;
+      }
+      throw error;
+    }
+  };
+  const hasSamePhysicalIdentity = (
+    actual: CataloguePathIdentity | undefined,
+    expected: CataloguePathIdentity,
+  ): boolean => Boolean(
+    actual
+    && actual.ino !== 0
+    && expected.ino !== 0
+    && actual.dev === expected.dev
+    && actual.ino === expected.ino,
+  );
+
+  return {
+    sources,
+    errors,
+    findSourceByRdfFile: (path) => {
+      const actual = identityForPath(path);
+      return sourceIdentities.find(({ identity }) =>
+        hasSamePhysicalIdentity(actual, identity))?.source;
+    },
+    matchesRdfFile: (path) => {
+      const actual = identityForPath(path);
+      return rdfFileIdentities.some((identity) =>
+        hasSamePhysicalIdentity(actual, identity));
+    },
+  };
 }
 
 function decodeUtf8(bytes: Uint8Array, path: string): string {

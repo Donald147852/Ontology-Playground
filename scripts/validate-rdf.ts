@@ -350,9 +350,25 @@ export function runValidationCli(
       | ReturnType<typeof discoverCatalogueSources>
       | undefined;
 
-    if (inputFiles.some((input) => input.isCatalogue)) {
+    if (
+      canonicalCatalogueRoot !== undefined
+      || inputFiles.some((input) => input.isCatalogue)
+    ) {
       try {
         catalogueDiscovery = discoverCatalogueSources(catalogueRoot);
+      } catch (error) {
+        console.error((error as Error).message);
+        return 1;
+      }
+    }
+
+    if (catalogueDiscovery) {
+      try {
+        for (const input of inputFiles) {
+          input.isCatalogue ||= catalogueDiscovery.matchesRdfFile(
+            input.filePath,
+          );
+        }
       } catch (error) {
         console.error((error as Error).message);
         return 1;
@@ -384,10 +400,13 @@ export function runValidationCli(
           const requestedCanonicalPath =
             input.canonicalFilePath ?? filePath;
           try {
-            const source = catalogueDiscovery?.sources.find(
-              (candidate) =>
-                canonicalPath(candidate.rdfPath)
-                === requestedCanonicalPath,
+            const source = (
+              catalogueDiscovery?.findSourceByRdfFile(filePath)
+              ?? catalogueDiscovery?.sources.find(
+                (candidate) =>
+                  canonicalPath(candidate.rdfPath)
+                  === requestedCanonicalPath,
+              )
             );
             report = source
               ? validateCatalogueSource(source)
