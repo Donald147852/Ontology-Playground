@@ -86,8 +86,14 @@ describe('OntologyDesigner catalogue provenance', () => {
     const user = userEvent.setup();
     render(<OntologyDesigner route={{ page: 'designer' }} />);
 
-    expect(screen.getByRole('note').textContent).toContain(
-      'changes only the supported visual subset',
+    const note = screen.getByRole('note');
+    expect(note.classList.contains('source-fidelity-note')).toBe(true);
+    expect(note.querySelector('.lucide-info')).toBeTruthy();
+    expect(note.textContent).toContain(
+      'You are editing the visual subset',
+    );
+    expect(note.textContent).toContain(
+      'source-only RDF remains intact in the reviewed source',
     );
     expect(screen.getByText('External Equipment')).toBeTruthy();
 

@@ -1,10 +1,11 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Layers, ArrowRight, Search, Code, User, Pencil, Share2, ExternalLink, Scale, FileCheck2, Download, AlertTriangle } from 'lucide-react';
+import { X, Layers, ArrowRight, Search, Code, User, Pencil, Share2, ExternalLink, Scale, FileCheck2, Download } from 'lucide-react';
 import { useDesignerStore } from '../store/designerStore';
 import { useAppStore } from '../store/appStore';
 import { serializeToRDF } from '../lib/rdf/serializer';
 import { highlightRdf, RDF_HIGHLIGHT_DARK, RDF_HIGHLIGHT_LIGHT } from '../lib/rdf/highlighter';
+import { SourceFidelityNote } from './SourceFidelityNote';
 import {
   loadCatalogueEntry,
   loadCatalogueIndex,
@@ -627,30 +628,12 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
                   )}
 
                   {entry.source === 'external' && (
-                    <div
-                      role="note"
-                      style={{
-                        alignItems: 'flex-start',
-                        background: 'rgba(255, 185, 0, 0.10)',
-                        border: '1px solid rgba(255, 185, 0, 0.35)',
-                        borderRadius: 'var(--radius-sm)',
-                        color: 'var(--text-secondary)',
-                        display: 'flex',
-                        fontSize: 11,
-                        gap: 6,
-                        lineHeight: 1.4,
-                        marginBottom: 10,
-                        padding: 8,
-                      }}
-                    >
-                      <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 1 }} />
-                      <span>
-                        The graph and Designer use a supported visual subset.
-                        Editing or generated RDF export can omit source-only
-                        SHACL rules and unsupported triples. The verified
-                        original remains available separately.
-                      </span>
-                    </div>
+                    <SourceFidelityNote className="catalogue-source-fidelity-note">
+                      <strong>About this view:</strong> The graph, Designer, and
+                      generated RDF use a visual subset. Source-only SHACL rules
+                      and unsupported triples remain intact in the reviewed
+                      source.
+                    </SourceFidelityNote>
                   )}
 
                   {/* Stats + actions */}
@@ -924,7 +907,7 @@ function GalleryRdfSource({
       </strong>
       <p style={{ margin: '4px 0 8px', fontSize: 11, color: 'var(--text-secondary)' }}>
         {isSubset
-          ? 'Generated from the visual model. Mapped classes, object properties, subclass edges, and ontology metadata are retained; source-only SHACL rules and unsupported triples can be omitted. Imports are recorded but never fetched.'
+          ? 'Generated from the visual model, not the complete upstream ontology. It includes mapped classes, object properties, subclass edges, and ontology metadata. Source-only RDF remains in the reviewed source; imports are recorded but never fetched.'
           : 'Generated from the Playground visual model and data bindings.'}
       </p>
       <RdfCodeBlock>{highlighted}</RdfCodeBlock>
