@@ -106,7 +106,9 @@ function serializeOntologyDeclaration(
   if (ontology.description) {
     rdf += `        <rdfs:comment>${escapeXml(ontology.description)}</rdfs:comment>\n`;
   }
-  rdf += `        <opmeta:generatedSubset rdf:datatype="${XSD_NS}boolean">true</opmeta:generatedSubset>\n`;
+  if (metadata) {
+    rdf += `        <opmeta:generatedSubset rdf:datatype="${XSD_NS}boolean">true</opmeta:generatedSubset>\n`;
+  }
   if (metadata?.ontologyIri) {
     rdf += `        <dcterms:source rdf:resource="${escapeXml(metadata.ontologyIri)}"/>\n`;
   }
@@ -302,7 +304,11 @@ export function serializeStandardsRDF(ontology: Ontology): string {
   const parentsByEntity = subclassParents(ontology);
   const enumLists: Array<{ prefix: string; values: string[] }> = [];
   let rdf = '<?xml version="1.0" encoding="UTF-8"?>\n';
-  rdf += serializeNamespaces(baseUri, true, true);
+  rdf += serializeNamespaces(
+    baseUri,
+    true,
+    ontology.rdfMetadata !== undefined,
+  );
   rdf += serializeOntologyDeclaration(ontology, baseUri);
   rdf += '    <!-- Standards-oriented OWL + SHACL profile. Playground-only UI metadata and bindings are omitted. -->\n\n';
 
