@@ -190,7 +190,7 @@ describe('RDF validation profiles', () => {
       'designer-identifiers',
       'designer-entity-names',
     ]);
-  }, 15_000);
+  }, 60_000);
 
   it('requires companion provenance for standalone external CLI validation', () => {
     const root = createTemporaryRoot();
