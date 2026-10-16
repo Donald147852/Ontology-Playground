@@ -298,6 +298,8 @@ These enhance the overall experience for a community learning resource.
 - [ ] Useful for reviewing community PRs or comparing versions
 
 ### 5.3 Accessibility & responsive design
+- [x] Use theme-aware yellow foreground tokens in welcome, help, data-source,
+      and quest panels instead of fill colors or hard-coded yellow
 - [x] WCAG 2.1 AA color contrast: audited all four themes, fixed failing text and
       graph tokens, added `--on-accent` / `--graph-edge-label-bg`, and wired an
       automated contrast gate (`npm run test:a11y`) into CI
