@@ -36,6 +36,8 @@ below covers the supported visual model, not arbitrary RDF dataset editing.
 - [x] Keep graph overlays and exports usable: collapse or auto-collapse the
   entity legend, export only the visible graph within safe canvas limits, and
   report PNG generation failures instead of downloading empty files
+- [x] Render catalogue PR previews from completed graph layouts rather than
+  legend visibility, validating PNG dimensions and honoring safe export limits
 - [x] Round-trip fidelity: `parse(serialize(ontology))` must produce an
   equivalent ontology
 
@@ -312,7 +314,8 @@ These enhance the overall experience for a community learning resource.
       graph tokens, added `--on-accent` / `--graph-edge-label-bg`, and wired an
       automated contrast gate (`npm run test:a11y`) into CI
 - [ ] Audit and fix keyboard navigation across all modals and panels
-- [ ] Add ARIA labels to the graph visualization
+- [x] Add an accessible ontology summary and explicit graph-control names,
+      including visible semantic-overview counts without hiding sibling controls
 - [ ] Ensure the app is usable on tablet-sized screens (responsive breakpoints)
 - [ ] Test with screen readers (VoiceOver, NVDA)
 

@@ -29,6 +29,11 @@ cover the supported theme palettes.
 Cytoscape.js-powered graph that renders any ontology as an interactive
 node-and-edge diagram. Pan, zoom, click nodes to inspect properties, and use
 the live search bar to filter entities and relationships.
+The graph has an accessible text summary naming the ontology and its entity
+and relationship totals; semantic overviews also identify the visible counts.
+Zoom, fit, reset, and PNG download controls have explicit accessible names,
+while the legend and semantic-view controls remain independently accessible.
+This summary does not provide keyboard navigation of canvas nodes.
 
 ### Ontology Catalogue
 
@@ -90,8 +95,10 @@ When its 180-entity view limit is full it explains which neighbors remain
 hidden and asks you to hide a shown neighborhood before expanding another. The
 entity legend can be collapsed and automatically starts collapsed when it would
 obscure a larger graph. PNG downloads export the currently visible graph within
-browser-safe image limits and report failures instead of saving an empty file. All
-node-specific expansions and the current selection/focus clear when the detail
+browser-safe image limits and report failures instead of saving an empty file.
+Automated catalogue PR previews wait for the requested graph's completed layout,
+independent of whether its legend is collapsed or absent. All node-specific
+expansions and the current selection/focus clear when the detail
 slider changes, so each hop level starts as an unfocused hierarchy projection
 while independent query and path highlights remain visible. Clicking anywhere
 clearly to either side of the slider thumb moves to another hop even when the
