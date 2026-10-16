@@ -93,8 +93,10 @@ When its 180-entity view limit is full it explains which neighbors remain
 hidden and asks you to hide a shown neighborhood before expanding another. The
 entity legend can be collapsed and automatically starts collapsed when it would
 obscure a larger graph. PNG downloads export the currently visible graph within
-browser-safe image limits and report failures instead of saving an empty file. All
-node-specific expansions and the current selection/focus clear when the detail
+browser-safe image limits and report failures instead of saving an empty file.
+Automated catalogue PR previews wait for the requested graph's completed layout,
+independent of whether its legend is collapsed or absent. All node-specific
+expansions and the current selection/focus clear when the detail
 slider changes, so each hop level starts as an unfocused hierarchy projection
 while independent query and path highlights remain visible. Clicking anywhere
 clearly to either side of the slider thumb moves to another hop even when the

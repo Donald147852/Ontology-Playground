@@ -218,5 +218,8 @@ Include in PR description:
 - Missing PR preview image:
   - Confirm the PR changes a catalogue RDF, OWL, or metadata file.
   - Check the preview workflow logs for catalogue compile or render failures.
+  - The renderer waits for the requested catalogue graph's completed layout,
+    not an expanded legend. Large legends remain collapsed, and massive
+    ontologies export their visible semantic overview within safe PNG limits.
 - PR checks failing:
   - Re-run local build and tests before pushing again.

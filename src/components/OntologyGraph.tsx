@@ -217,6 +217,7 @@ export function OntologyGraph() {
   
   const {
     currentOntology,
+    currentCatalogueEntry,
     selectedEntityId,
     selectedRelationshipId,
     highlightedEntities,
@@ -1390,6 +1391,8 @@ export function OntologyGraph() {
         ref={containerRef}
         className="graph-canvas"
         data-testid="ontology-graph-canvas"
+        data-catalogue-id={currentCatalogueEntry?.id}
+        data-layout-status={layoutStatus}
         role="img"
         aria-label={describeOntologyGraph(currentOntology, graphView)}
       />

@@ -36,6 +36,8 @@ below covers the supported visual model, not arbitrary RDF dataset editing.
 - [x] Keep graph overlays and exports usable: collapse or auto-collapse the
   entity legend, export only the visible graph within safe canvas limits, and
   report PNG generation failures instead of downloading empty files
+- [x] Render catalogue PR previews from completed graph layouts rather than
+  legend visibility, validating PNG dimensions and honoring safe export limits
 - [x] Round-trip fidelity: `parse(serialize(ontology))` must produce an
   equivalent ontology
 

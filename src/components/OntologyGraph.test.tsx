@@ -306,6 +306,34 @@ describe('OntologyGraph adaptive rendering', () => {
     await waitFor(() => expect(graphMocks.cytoscape).toHaveBeenCalledTimes(2));
   });
 
+  it('exposes the loaded catalogue identity and clears it for non-catalogue graphs', () => {
+    const ontology = createDenseFixture();
+    const entry = {
+      id: 'official/preview-fixture',
+      name: ontology.name,
+      description: ontology.description,
+      category: 'Education',
+      tags: [],
+      author: 'Ontology Playground',
+      source: 'official' as const,
+      entityCount: ontology.entityTypes.length,
+      relationshipCount: ontology.relationships.length,
+      payloadUrl: '/preview-fixture.json',
+      payloadHash: `sha256:${'a'.repeat(64)}`,
+    };
+    useAppStore.getState().loadOntology(ontology, [], entry);
+    render(<OntologyGraph />);
+    const canvas = screen.getByTestId('ontology-graph-canvas');
+    expect(canvas).toHaveAttribute('data-catalogue-id', entry.id);
+    expect(canvas).toHaveAttribute('data-layout-status', 'idle');
+    expect(screen.getByRole('button', {
+      name: 'Show Entity Types legend',
+    })).toHaveAttribute('aria-expanded', 'false');
+    expect(document.querySelector('.legend-item')).toBeNull();
+    act(() => useAppStore.getState().loadOntology(createDenseFixture()));
+    expect(canvas).not.toHaveAttribute('data-catalogue-id');
+  });
+
   it('names the bounded projection and updates visible counts with semantic detail', async () => {
     const ontology = createLargeFixture();
     useAppStore.getState().loadOntology(ontology);
@@ -495,6 +523,8 @@ describe('OntologyGraph adaptive rendering', () => {
     try {
       useAppStore.getState().loadOntology(createLargeFixture());
       render(<OntologyGraph />);
+      const canvas = screen.getByTestId('ontology-graph-canvas');
+      expect(canvas).toHaveAttribute('data-layout-status', 'scheduled');
 
       fireEvent.click(
         screen.getByRole('button', { name: 'Cancel rendering' }),
@@ -503,6 +533,7 @@ describe('OntologyGraph adaptive rendering', () => {
         vi.runAllTimers();
       });
       expect(screen.getByText('Rendering paused')).toBeInTheDocument();
+      expect(canvas).toHaveAttribute('data-layout-status', 'cancelled');
       expect(graphMocks.cytoscape).not.toHaveBeenCalled();
 
       fireEvent.click(
@@ -512,6 +543,7 @@ describe('OntologyGraph adaptive rendering', () => {
         vi.advanceTimersByTime(1_000);
       });
       expect(graphMocks.cytoscape).toHaveBeenCalledTimes(1);
+      expect(canvas).toHaveAttribute('data-layout-status', 'idle');
     } finally {
       vi.useRealTimers();
     }
@@ -528,6 +560,8 @@ describe('OntologyGraph adaptive rendering', () => {
         vi.advanceTimersByTime(0);
       });
       expect(screen.getByText('Laying out bounded graph')).toBeInTheDocument();
+      expect(screen.getByTestId('ontology-graph-canvas'))
+        .toHaveAttribute('data-layout-status', 'running');
       expect(graphMocks.layout.run).toHaveBeenCalledTimes(1);
 
       fireEvent.click(
