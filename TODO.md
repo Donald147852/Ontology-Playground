@@ -8,8 +8,8 @@
 
 ## 1. RDF Import / Export (with full test coverage)
 
-The current RDF export is inline in `ImportExportModal.tsx` and there is no RDF
-**import**. RDF should become a first-class serialization format.
+RDF import and export are implemented in `src/lib/rdf/`. The completed work
+below covers the supported visual model, not arbitrary RDF dataset editing.
 
 ### 1.1 Extract RDF serialization module
 - [x] Create `src/lib/rdf/serializer.ts` — move the existing `exportAsRDF()`
@@ -76,11 +76,19 @@ The current RDF export is inline in `ImportExportModal.tsx` and there is no RDF
 - [x] Parse the generated standard constraints so statement reordering does not
   break round trips
 - [x] Document what each profile preserves and omits
-- [x] Preserve ontology IRI, version, license, imports, subclass edges, and
-  object-property semantics without dereferencing external resources
+- [x] Retain source ontology IRI, version, license, and import metadata, plus
+  supported internal subclass edges and object-property associations, without
+  dereferencing external resources
 - [x] Keep exact external source bytes available separately from generated RDF
   and disclose visual-model limitations in gallery, Designer, export, and embed
   surfaces
+- [x] Document the current external-generator import contract, including typed
+  descriptions (#96), native subclass axioms (#102), endpoint validation,
+  and original-source versus generated-subset boundaries (#154/#155); see
+  [Generating RDF from External Tools](docs/external-rdf-generators.md)
+- [ ] Future: implement full editable RDF dataset preservation beyond the
+  supported visual subset. Exact catalogue source artifacts and generated
+  profiles do not provide this capability.
 
 ---
 

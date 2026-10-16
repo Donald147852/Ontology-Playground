@@ -3,6 +3,8 @@
 Ontology Playground exposes two RDF/XML export profiles with different
 contracts. Choose the profile based on whether the file needs to return to the
 editor or be consumed primarily by standards-based RDF tooling.
+For generator-side input requirements, supported declarations, and parser
+limits, see [Generating RDF from External Tools](external-rdf-generators.md).
 
 ## Playground round-trip
 
