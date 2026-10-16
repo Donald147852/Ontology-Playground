@@ -50,7 +50,9 @@ triples. Every ontology has a shareable deep link
 A full-screen, split-pane editor for creating ontologies from scratch or
 editing existing ones. Add entity types with icons, colors, and typed
 properties; define relationships with cardinalities; see a live graph preview
-that updates as you work. Includes undo/redo (50 levels), real-time validation,
+that updates as you work, including reconnecting edges when a relationship's
+From or To entity changes without repositioning existing nodes.
+Includes undo/redo (50 levels), real-time validation,
 and export to RDF/XML or JSON.
 
 ### RDF Import & Export
