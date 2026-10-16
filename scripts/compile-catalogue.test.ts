@@ -24,6 +24,8 @@ import {
 } from './compile-catalogue';
 
 const ROOT = join(import.meta.dirname, '..');
+/** Spawning `npx tsx` and compiling the whole catalogue exceeds Vitest's 5s default. */
+const CATALOGUE_BUILD_TIMEOUT_MS = 60000;
 const CATALOGUE_JSON = join(ROOT, 'public', 'catalogue.json');
 const PAYLOAD_MANIFEST_JSON = join(
   ROOT,
@@ -207,7 +209,7 @@ describe('catalogue compilation (end-to-end)', () => {
     const result = execSync('npx tsx scripts/compile-catalogue.ts', {
       cwd: ROOT,
       encoding: 'utf-8',
-      timeout: 60000,
+      timeout: CATALOGUE_BUILD_TIMEOUT_MS,
     });
     expect(result).toContain('official/cosmic-coffee');
     expect(result).toContain('official/ecommerce');
@@ -218,7 +220,7 @@ describe('catalogue compilation (end-to-end)', () => {
     expect(output.count).toBe(output.entries.length);
     expect(output.entries.length).toBeGreaterThan(0);
     expect(output.generatedAt).toBeTruthy();
-  }, 65000);
+  }, CATALOGUE_BUILD_TIMEOUT_MS + 5000);
 
   it('catalogue.json entries have required fields', () => {
     const output = readCatalogue();
