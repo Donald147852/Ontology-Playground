@@ -20,6 +20,10 @@ fully static site with zero backend dependencies.
 
 ## Features
 
+Text and icons use theme-aware foreground colors, including yellow accents in
+the welcome, help, data-source, and quest panels. Automated contrast checks
+cover the supported theme palettes.
+
 ### Interactive Graph Exploration
 
 Cytoscape.js-powered graph that renders any ontology as an interactive
