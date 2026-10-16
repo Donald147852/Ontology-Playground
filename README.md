@@ -351,6 +351,7 @@ The table below lists the main end-user and contributor guides. Internal plannin
 | [RDF Export Profiles](docs/rdf-export-profiles.md) | When to use the lossless Playground round-trip profile or the standards-oriented OWL + SHACL profile |
 | [Contribute an Ontology: From Design to GitHub](docs/contributing-ontology-from-design-to-github.md) | End-to-end contributor workflow: design, RDF export, metadata, local validation, and pull request |
 | [Embedding Guide](docs/embed-guide.md) | How to embed interactive ontology widgets on any web page |
+| [Generating RDF from External Tools](docs/external-rdf-generators.md) | Current RDF/XML import subset, typed descriptions, native subclass axioms, and source-artifact versus generated-subset limits for external generators |
 | [GitHub OAuth Setup](docs/github-oauth-setup.md) | How to configure GitHub OAuth for one-click catalogue PRs |
 | [Embed Security](docs/embed-security.md) | Security model for the embeddable widget |
 | [Learning Content Guide](docs/learn-content-guide.md) | How to author courses, articles, quizzes, and ontology embeds for the Ontology School |
