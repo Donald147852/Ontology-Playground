@@ -16,6 +16,7 @@ import type {
   LayoutOptions,
 } from 'cytoscape';
 import { useAppStore } from '../store/appStore';
+import { describeOntologyGraph } from '../lib/graphA11y';
 import {
   AlertTriangle,
   Crosshair,
@@ -1385,7 +1386,13 @@ export function OntologyGraph() {
 
   return (
     <div className="graph-container">
-      <div ref={containerRef} className="graph-canvas" data-testid="ontology-graph-canvas" />
+      <div
+        ref={containerRef}
+        className="graph-canvas"
+        data-testid="ontology-graph-canvas"
+        role="img"
+        aria-label={describeOntologyGraph(currentOntology, graphView)}
+      />
 
       {isBoundedView && (
         <LargeGraphControls
@@ -1495,6 +1502,7 @@ export function OntologyGraph() {
           className="graph-control-btn"
           onClick={handleZoomIn}
           title="Zoom In"
+          aria-label="Zoom in"
           disabled={graphZoom >= MAX_GRAPH_ZOOM - 0.001}
         >
           <ZoomIn size={18} />
@@ -1503,14 +1511,15 @@ export function OntologyGraph() {
           className="graph-control-btn"
           onClick={handleZoomOut}
           title="Zoom Out"
+          aria-label="Zoom out"
           disabled={graphZoom <= MIN_GRAPH_ZOOM + 0.001}
         >
           <ZoomOut size={18} />
         </button>
-        <button className="graph-control-btn" onClick={handleFit} title="Fit to View">
+        <button className="graph-control-btn" onClick={handleFit} title="Fit to View" aria-label="Fit graph to view">
           <Maximize2 size={18} />
         </button>
-        <button className="graph-control-btn" onClick={handleReset} title="Reset Layout">
+        <button className="graph-control-btn" onClick={handleReset} title="Reset Layout" aria-label="Reset graph layout">
           <RotateCcw size={18} />
         </button>
         <button

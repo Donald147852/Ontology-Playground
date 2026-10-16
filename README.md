@@ -29,6 +29,11 @@ cover the supported theme palettes.
 Cytoscape.js-powered graph that renders any ontology as an interactive
 node-and-edge diagram. Pan, zoom, click nodes to inspect properties, and use
 the live search bar to filter entities and relationships.
+The graph has an accessible text summary naming the ontology and its entity
+and relationship totals; semantic overviews also identify the visible counts.
+Zoom, fit, reset, and PNG download controls have explicit accessible names,
+while the legend and semantic-view controls remain independently accessible.
+This summary does not provide keyboard navigation of canvas nodes.
 
 ### Ontology Catalogue
 
