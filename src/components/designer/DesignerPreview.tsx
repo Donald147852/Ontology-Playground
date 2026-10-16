@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import cytoscape from 'cytoscape';
 import fcose from 'cytoscape-fcose';
 import type { Core } from 'cytoscape';
+import { syncGraphElements, type PreviewOntology } from './syncGraphElements';
 import { useDesignerStore } from '../../store/designerStore';
 import { useAppStore, type ThemeId } from '../../store/appStore';
 import { serializeToRDF } from '../../lib/rdf/serializer';
@@ -65,17 +66,7 @@ export function DesignerPreview({
 // ─── Graph tab ───────────────────────────────────────────────────────────────
 
 interface GraphPreviewProps {
-  ontology: {
-    entityTypes: { id: string; name: string; icon: string; color: string }[];
-    relationships: {
-      id: string;
-      name: string;
-      from: string;
-      to: string;
-      cardinality: string;
-      kind?: 'association' | 'subclass';
-    }[];
-  };
+  ontology: PreviewOntology;
   theme: ThemeId;
   onSelectEntity: (id: string | null) => void;
   onSelectRelationship: (id: string | null) => void;
@@ -198,79 +189,7 @@ function GraphPreview({ ontology, theme, onSelectEntity, onSelectRelationship }:
 
   // Incrementally sync nodes & edges without full relayout
   useEffect(() => {
-    const cy = cyRef.current;
-    if (!cy) return;
-
-    const currentNodeIds = new Set(cy.nodes().map((n) => n.id()));
-    const currentEdgeIds = new Set(cy.edges().map((e) => e.id()));
-    const desiredNodeIds = new Set(ontology.entityTypes.map((e) => e.id));
-    const desiredEdgeIds = new Set(ontology.relationships.map((r) => r.id));
-
-    // Remove deleted elements
-    const toRemove = cy.elements().filter((ele) => {
-      const id = ele.id();
-      return ele.isNode() ? !desiredNodeIds.has(id) : !desiredEdgeIds.has(id);
-    });
-    if (toRemove.length) toRemove.remove();
-
-    // Add new nodes
-    const newNodes: { data: Record<string, string> }[] = [];
-    for (const entity of ontology.entityTypes) {
-      if (!currentNodeIds.has(entity.id)) {
-        newNodes.push({ data: { id: entity.id, label: `${entity.icon} ${entity.name}`, color: entity.color } });
-      }
-    }
-
-    // Add new edges
-    const newEdges: { data: Record<string, string> }[] = [];
-    for (const rel of ontology.relationships) {
-      if (!currentEdgeIds.has(rel.id)) {
-        newEdges.push({
-          data: {
-            id: rel.id,
-            source: rel.from,
-            target: rel.to,
-            label: rel.name,
-            kind: rel.kind ?? 'association',
-          },
-        });
-      }
-    }
-
-    if (newNodes.length || newEdges.length) {
-      cy.add([...newNodes, ...newEdges]);
-      // Only lay out NEW nodes near existing ones, keeping existing positions
-      if (newNodes.length) {
-        const newEles = cy.collection();
-        for (const n of newNodes) {
-          newEles.merge(cy.getElementById(n.data.id));
-        }
-        // Position new nodes near the center of the viewport
-        const { x1, y1, w, h } = cy.extent();
-        const cx = x1 + w / 2;
-        const cy2 = y1 + h / 2;
-        newEles.forEach((ele, i) => {
-          ele.position({ x: cx + (i - newNodes.length / 2) * 80, y: cy2 });
-        });
-      }
-      cy.fit(undefined, 40);
-    }
-
-    // Update cosmetic data on existing elements
-    for (const entity of ontology.entityTypes) {
-      const node = cy.getElementById(entity.id);
-      if (node.length) {
-        node.data('label', `${entity.icon} ${entity.name}`);
-        node.data('color', entity.color);
-      }
-    }
-    for (const rel of ontology.relationships) {
-      const edge = cy.getElementById(rel.id);
-      if (edge.length) {
-        edge.data('label', rel.name);
-        edge.data('kind', rel.kind ?? 'association');
-      }
-    }
+    if (cyRef.current) syncGraphElements(cyRef.current, ontology);
   }, [ontology]);
 
   return <div ref={containerRef} className="designer-graph-container" />;

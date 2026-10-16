@@ -378,6 +378,8 @@ one-click PR flow.
   the right
 - [x] Graph updates in real-time as entities and relationships are
   added/edited/removed
+- [x] Reconnect preview edges when From/To changes, including when the old
+  endpoint is removed, while preserving existing node positions
 - [x] Click a node or edge in the graph to select it in the editor
 
 ### 6.4 RDF output & validation
