@@ -546,6 +546,7 @@ async function fetchCatalogueSource(
     mediaType: entry.sourceArtifactMediaType,
     hash: entry.sourceArtifactHash,
     sourceArtifactUrl: entry.sourceArtifactUrl,
+    documentUrl: sourceUrl.href,
   };
 }
 
@@ -699,6 +700,13 @@ export function loadCatalogueSource(
 ): Promise<LoadedCatalogueSource> {
   const indexUrl = getCatalogueIndexUrl(baseUrl);
   return loadCatalogueSourceUncached(id, baseUrl, indexUrl);
+}
+
+export function loadCatalogueSourceForEntry(
+  entry: CatalogueEntry,
+  baseUrl: string = import.meta.env.BASE_URL,
+): Promise<LoadedCatalogueSource> {
+  return requestCatalogueSource(entry, getCatalogueIndexUrl(baseUrl));
 }
 
 export function clearCatalogueCache(): void {

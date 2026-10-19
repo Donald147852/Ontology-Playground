@@ -43,6 +43,43 @@ describe('parseRDF', () => {
 
 </rdf:RDF>`;
 
+  it.each(['Literal', 'Unsupported'])(
+    'does not project RDF-looking markup inside rdf:parseType="%s"',
+    (parseType) => {
+      const rdf = `<?xml version="1.0"?>
+<rdf:RDF
+    xmlns:rdf="${RDF_NS}"
+    xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+    xmlns:owl="http://www.w3.org/2002/07/owl#"
+    xmlns:sh="http://www.w3.org/ns/shacl#"
+    xmlns:ex="https://example.org/ns#">
+  <rdf:Description rdf:about="https://example.org/source">
+    <ex:markup rdf:parseType="${parseType}">
+      <owl:Ontology rdf:about="https://example.org/fabricated">
+        <rdfs:label>Fabricated ontology</rdfs:label>
+      </owl:Ontology>
+      <rdf:Description rdf:about="https://example.org/fabricated-class">
+        <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+        <rdfs:label>Fabricated class</rdfs:label>
+      </rdf:Description>
+      <sh:NodeShape rdf:about="https://example.org/fabricated-shape"/>
+    </ex:markup>
+  </rdf:Description>
+</rdf:RDF>`;
+
+      const parsed = parseRDF(rdf, { allowEmptyProjection: true });
+
+      expect(parsed.ontology.name).toBe('Imported Ontology');
+      expect(parsed.ontology.entityTypes).toEqual([]);
+      expect(parsed.ontology.relationships).toEqual([]);
+      expect(parsed.ontology.rdfMetadata).toBeUndefined();
+      expect(parsed.projection).toEqual({
+        entities: {},
+        relationships: {},
+      });
+    },
+  );
+
   it('extracts ontology provenance without dereferencing imports or executing SHACL', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     const rdf = `<?xml version="1.0"?>
@@ -153,6 +190,64 @@ describe('parseRDF', () => {
       const { ontology } = parseRDF(rdf);
       expect(ontology.entityTypes[0].icon).toBe('📦');
       expect(ontology.entityTypes[0].color).toBe('#0078D4');
+    });
+
+    it.each([
+      {
+        identity: 'rdf:ID="Room"',
+        expectedIri: 'https://example.com/model.rdf#Room',
+        expectedEntityId: 'room',
+      },
+      {
+        identity: 'rdf:about=""',
+        expectedIri: 'https://example.com/model.rdf',
+        expectedEntityId: 'entity',
+      },
+    ])(
+      'projects a standalone root with $identity',
+      ({ identity, expectedIri, expectedEntityId }) => {
+        const rdf = `<owl:Class
+  xmlns:rdf="${RDF_NS}"
+  xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+  xmlns:owl="http://www.w3.org/2002/07/owl#"
+  ${identity}>
+  <rdfs:label>Room</rdfs:label>
+</owl:Class>`;
+
+        const parsed = parseRDF(rdf, {
+          baseIri: 'https://example.com/model.rdf',
+        });
+
+        expect(parsed.ontology.entityTypes).toEqual([
+          expect.objectContaining({
+            id: expectedEntityId,
+            name: 'Room',
+          }),
+        ]);
+        expect(parsed.projection.entities[expectedEntityId]?.term).toEqual({
+          termType: 'NamedNode',
+          value: expectedIri,
+        });
+      },
+    );
+
+    it('projects a standalone blank-node class as read-only', () => {
+      const rdf = `<owl:Class
+  xmlns:rdf="${RDF_NS}"
+  xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+  xmlns:owl="http://www.w3.org/2002/07/owl#"
+  rdf:nodeID="room">
+  <rdfs:label>Room</rdfs:label>
+</owl:Class>`;
+
+      const parsed = parseRDF(rdf, {
+        baseIri: 'https://example.com/model.rdf',
+      });
+
+      expect(parsed.ontology.entityTypes).toEqual([
+        expect.objectContaining({ name: 'Room' }),
+      ]);
+      expect(parsed.projection.entities).toEqual({});
     });
   });
 
@@ -839,6 +934,179 @@ describe('parseRDF', () => {
       expect(ontology.relationships.map((relationship) => relationship.id)).toContain(
         'hVAC-subClassOf-equipment-2'
       );
+    });
+
+    it('resolves nested xml:base scopes before coalescing projection identity', () => {
+      const rdf = `<?xml version="1.0"?>
+<rdf:RDF
+    xml:base="https://example.com/root/"
+    xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+    xmlns:owl="http://www.w3.org/2002/07/owl#">
+    <owl:Class xml:base="../model/" rdf:about="Thing">
+      <rdfs:label>Room</rdfs:label>
+    </owl:Class>
+    <owl:Class rdf:about="../model/Thing">
+      <rdfs:comment>The same class</rdfs:comment>
+    </owl:Class>
+</rdf:RDF>`;
+
+      const parsed = parseRDF(rdf);
+
+      expect(parsed.ontology.entityTypes).toEqual([
+        expect.objectContaining({
+          id: 'thing',
+          name: 'Room',
+          description: 'The same class',
+        }),
+      ]);
+      expect(parsed.projection.entities.thing?.term).toEqual({
+        termType: 'NamedNode',
+        value: 'https://example.com/model/Thing',
+      });
+      expect(parsed.ontology.relationships).toEqual([]);
+    });
+
+    it('resolves property resources against their inherited xml:base', () => {
+      const rdf = `<?xml version="1.0"?>
+<rdf:RDF
+    xml:base="https://example.com/root/"
+    xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+    xmlns:owl="http://www.w3.org/2002/07/owl#">
+  <owl:Class rdf:about="../model/Source"/>
+  <owl:Class rdf:about="../model/Target"/>
+  <owl:ObjectProperty xml:base="../model/" rdf:about="connects">
+    <rdfs:domain rdf:resource="Source"/>
+    <rdfs:range rdf:resource="Target"/>
+  </owl:ObjectProperty>
+</rdf:RDF>`;
+
+      const parsed = parseRDF(rdf);
+
+      expect(parsed.ontology.relationships).toEqual([
+        expect.objectContaining({
+          from: 'source',
+          to: 'target',
+          name: 'connects',
+        }),
+      ]);
+      expect(parsed.projection.relationships.connects).toEqual({
+        kind: 'association',
+        term: {
+          termType: 'NamedNode',
+          value: 'https://example.com/model/connects',
+        },
+      });
+    });
+
+    it('maps an empty ontology rdf:about to the effective base IRI', () => {
+      const rdf = `<?xml version="1.0"?>
+<rdf:RDF
+    xml:base="https://example.com/ontology"
+    xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+    xmlns:owl="http://www.w3.org/2002/07/owl#">
+  <owl:Ontology rdf:about="">
+    <rdfs:label>Base ontology</rdfs:label>
+  </owl:Ontology>
+</rdf:RDF>`;
+
+      const parsed = parseRDF(rdf);
+
+      expect(parsed.ontology.rdfMetadata?.ontologyIri)
+        .toBe('https://example.com/ontology');
+      expect(parsed.projection.ontology?.term).toEqual({
+        termType: 'NamedNode',
+        value: 'https://example.com/ontology',
+      });
+    });
+
+    it('preserves RDF IRI identity when resolving projection resources', () => {
+      const rdf = `<?xml version="1.0"?>
+<rdf:RDF
+    xml:base="https://EXAMPLE.com:443/café/"
+    xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+    xmlns:owl="http://www.w3.org/2002/07/owl#">
+  <owl:Class rdf:about="Thing">
+    <rdfs:label>Thing</rdfs:label>
+  </owl:Class>
+  <owl:Class rdf:about="https://example.com/caf%C3%A9/Thing">
+    <rdfs:label>Thing</rdfs:label>
+  </owl:Class>
+</rdf:RDF>`;
+
+      const parsed = parseRDF(rdf);
+      const projectedTerms = parsed.ontology.entityTypes.map((entity) =>
+        parsed.projection.entities[entity.id]?.term.value);
+
+      expect(projectedTerms).toEqual([
+        'https://EXAMPLE.com:443/café/Thing',
+        'https://example.com/caf%C3%A9/Thing',
+      ]);
+    });
+
+    it('coalesces equivalent relative spellings of one RDF resource', () => {
+      const rdf = `<?xml version="1.0"?>
+<rdf:RDF
+    xml:base="https://example.org/model/"
+    xmlns:rdf="${RDF_NS}"
+    xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+    xmlns:owl="http://www.w3.org/2002/07/owl#">
+  <owl:Class rdf:about="Thing">
+    <rdfs:label>Thing</rdfs:label>
+  </owl:Class>
+  <owl:Class rdf:about="./Thing">
+    <rdfs:comment>The same resource</rdfs:comment>
+  </owl:Class>
+</rdf:RDF>`;
+
+      const parsed = parseRDF(rdf);
+
+      expect(parsed.ontology.entityTypes).toHaveLength(1);
+      expect(parsed.ontology.entityTypes[0]).toMatchObject({
+        id: 'thing',
+        description: 'The same resource',
+      });
+      expect(parsed.projection.entities).toEqual({
+        thing: {
+          term: {
+            termType: 'NamedNode',
+            value: 'https://example.org/model/Thing',
+          },
+        },
+      });
+    });
+
+    it('resolves dot segments and colons in relative projection IRIs', () => {
+      const rdf = `<?xml version="1.0"?>
+<rdf:RDF
+    xmlns:rdf="${RDF_NS}"
+    xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+    xmlns:owl="http://www.w3.org/2002/07/owl#">
+  <owl:Class rdf:about="../archive.../Thing">
+    <rdfs:label>Archived</rdfs:label>
+  </owl:Class>
+  <owl:Class rdf:about="/a/../C">
+    <rdfs:label>Root</rdfs:label>
+  </owl:Class>
+  <owl:Class rdf:about="dir/name:thing">
+    <rdfs:label>Colon</rdfs:label>
+  </owl:Class>
+</rdf:RDF>`;
+
+      const parsed = parseRDF(rdf, {
+        baseIri: 'https://example.org/a/base.rdf',
+      });
+      const projectedTerms = parsed.ontology.entityTypes.map((entity) =>
+        parsed.projection.entities[entity.id]?.term.value);
+
+      expect(projectedTerms).toEqual([
+        'https://example.org/archive.../Thing',
+        'https://example.org/C',
+        'https://example.org/a/dir/name:thing',
+      ]);
     });
   });
 

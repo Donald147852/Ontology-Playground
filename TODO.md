@@ -11,6 +11,32 @@
 RDF import and export are implemented in `src/lib/rdf/`. The completed work
 below covers the supported visual model, not arbitrary RDF dataset editing.
 
+### Priority: full RDF preservation
+
+Full-document preservation takes priority over expanding RDF editing features.
+See the [implementation plan](docs/plans/full-rdf-preservation/plan.md) for
+requirements, dependencies, tasks, and release gates.
+
+- [x] Plan complete-document preservation separately from bounded editing.
+- [x] P0: retain original bytes and the complete parsed RDF graph across all
+  source-backed workflows; export untouched files byte-for-byte and keep
+  source-backed semantic editing read-only until the patch path is ready.
+- [x] P1: enable only explicitly mapped edits with atomic undo/redo and
+  complete-graph export; preserve unsupported constructs without editing them.
+- [x] Harden standalone node roots, unknown `rdf:parseType` fallback, and the
+  complete XML 1.0 Unicode QName range in edited exports.
+- [x] Apply bounded complete ingestion to URL embeds, guard delayed Designer
+  loads and RDF editor parses, and block projection-only Fabric submission for
+  source-backed documents.
+- [x] Inline the embed RDF worker for cross-origin hosts, bound large source
+  rendering, preflight and cancel file reads, project all standalone root
+  identities safely, and suppress stale async downloads.
+
+RDF is a first-class source document. Imports retain exact bytes plus a complete
+graph, while Playground-authored documents continue to use generated profiles.
+Source-backed editing is limited to exact labels/comments and direct subclass
+edges; unsupported semantics remain preserved and read-only.
+
 ### 1.1 Extract RDF serialization module
 - [x] Create `src/lib/rdf/serializer.ts` — move the existing `exportAsRDF()`
   logic out of `ImportExportModal.tsx` into a pure function
@@ -443,6 +469,8 @@ one-click PR flow.
   Prism/highlight.js) to keep bundle size small
 - [x] Apply the same highlighting to the embed widget's RDF Source tab
   and the Gallery's "View RDF source" panel
+- [x] Fall back to a single plain-text node for multi-megabyte complete sources
+  so accepted RDF cannot overflow React's argument or token-tree limits
 
 ### 6.9 Download RDF from designer
 - [x] Add a "Download .rdf" button to the designer toolbar that saves the

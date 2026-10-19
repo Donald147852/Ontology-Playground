@@ -38,7 +38,7 @@ const fakePayloadContent = JSON.stringify(fakePayload, null, 2) + '\n';
 const fakePayloadHash = createHash('sha256')
   .update(fakePayloadContent)
   .digest('hex');
-const fakeSource = '<?xml version="1.0"?><rdf:RDF />\n';
+const fakeSource = '<?xml version="1.0"?><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" />\n';
 const fakeSourceHash = createHash('sha256')
   .update(fakeSource)
   .digest('hex');
@@ -160,6 +160,9 @@ function mockCatalogueFetch(catalogue: Catalogue = fakeCatalogue) {
     if (url.endsWith(catalogue.entries[0].payloadUrl)) {
       return new Response(fakePayloadContent, { status: 200 });
     }
+    if (url.endsWith(catalogue.entries[0].sourceArtifactUrl ?? '')) {
+      return new Response(fakeSource, { status: 200 });
+    }
     return new Response('not found', { status: 404 });
   });
 }
@@ -262,6 +265,9 @@ describe('EmbedWidget', () => {
       expect(screen.getByText('Test Ontology')).toBeTruthy();
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.some(([input]) =>
+      input.toString().endsWith(fakeCatalogue.entries[0].sourceArtifactUrl!),
+    )).toBe(false);
   });
 
   it('loads ontology from inline base64 JSON', async () => {
@@ -274,6 +280,140 @@ describe('EmbedWidget', () => {
     });
     expect(screen.getByText(/2 entities/)).toBeTruthy();
     expect(screen.getByText(/1 relationship/)).toBeTruthy();
+  });
+
+  it('retains complete RDF text loaded from a URL', async () => {
+    const rdf = `<?xml version="1.0"?>
+<rdf:RDF
+  xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+  xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+  xmlns:owl="http://www.w3.org/2002/07/owl#">
+  <owl:Ontology rdf:about="https://example.com/url">
+    <rdfs:label>URL Ontology</rdfs:label>
+  </owl:Ontology>
+  <owl:Class rdf:about="https://example.com/url#Thing">
+    <rdfs:label>Thing</rdfs:label>
+  </owl:Class>
+</rdf:RDF>`;
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(rdf, {
+        status: 200,
+        headers: { 'Content-Type': 'application/rdf+xml' },
+      }),
+    );
+    const user = userEvent.setup();
+    render(<EmbedWidget config={{
+      ontologyUrl: 'https://example.com/url.rdf',
+      theme: 'dark',
+      height: '400px',
+    }} />);
+
+    await screen.findByText('URL Ontology');
+    await user.click(screen.getByText('Complete RDF source'));
+
+    expect(document.querySelector('pre')?.textContent).toBe(rdf);
+  });
+
+  it('rejects a URL RDF DOCTYPE before visual projection', async () => {
+    const rdf = `<?xml version="1.0"?>
+<!DOCTYPE rdf:RDF [
+  <!ENTITY external SYSTEM "https://attacker.invalid/value">
+]>
+<rdf:RDF
+  xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+  xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+  xmlns:owl="http://www.w3.org/2002/07/owl#">
+  <owl:Ontology rdf:about="https://example.com/url">
+    <rdfs:label>&external;</rdfs:label>
+  </owl:Ontology>
+</rdf:RDF>`;
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(rdf, {
+        status: 200,
+        headers: { 'Content-Type': 'application/rdf+xml' },
+      }),
+    );
+
+    render(<EmbedWidget config={{
+      ontologyUrl: 'https://example.com/url.rdf',
+      theme: 'dark',
+      height: '400px',
+    }} />);
+
+    await screen.findByText(/DOCTYPE declarations are not accepted/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects oversized URL sources from their declared length before reading', async () => {
+    const arrayBuffer = vi.fn().mockResolvedValue(new ArrayBuffer(0));
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({
+        'Content-Length': String(8 * 1024 * 1024 + 1),
+      }),
+      body: null,
+      arrayBuffer,
+    } as unknown as Response);
+
+    render(<EmbedWidget config={{
+      ontologyUrl: 'https://example.com/oversized.rdf',
+      theme: 'dark',
+      height: '400px',
+    }} />);
+
+    await screen.findByText(/exceeds the 8,388,608 byte limit/);
+    expect(arrayBuffer).not.toHaveBeenCalled();
+  });
+
+  it('cancels a URL response stream when its actual bytes exceed the limit', async () => {
+    const chunks = [
+      new Uint8Array(8 * 1024 * 1024),
+      new Uint8Array([1]),
+    ];
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    const releaseLock = vi.fn();
+    const reader = {
+      read: vi.fn(async () => {
+        const value = chunks.shift();
+        return value
+          ? { done: false as const, value }
+          : { done: true as const, value: undefined };
+      }),
+      cancel,
+      releaseLock,
+    };
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      body: { getReader: () => reader },
+    } as unknown as Response);
+
+    render(<EmbedWidget config={{
+      ontologyUrl: 'https://example.com/streamed.rdf',
+      theme: 'dark',
+      height: '400px',
+    }} />);
+
+    await screen.findByText(/exceeds the 8,388,608 byte limit/);
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(releaseLock).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains URL JSON ontology compatibility with bounded loading', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(testOntology), { status: 200 }),
+    );
+
+    render(<EmbedWidget config={{
+      ontologyUrl: 'https://example.com/ontology.json',
+      theme: 'dark',
+      height: '400px',
+    }} />);
+
+    await screen.findByText('Test Ontology');
+    expect(screen.getByText(/2 entities/)).toBeTruthy();
   });
 
   it('shows error when no source specified', async () => {
@@ -334,7 +474,7 @@ describe('EmbedWidget', () => {
     expect(screen.getByText('Copy generated RDF')).toBeTruthy();
   });
 
-  it('discloses generated RDF subsets for external catalogue entries', async () => {
+  it('shows the complete verified RDF for catalogue entries', async () => {
     const externalCatalogue: Catalogue = {
       ...fakeCatalogue,
       entries: [{
@@ -351,18 +491,104 @@ describe('EmbedWidget', () => {
     }} />);
 
     await screen.findByText('Test Ontology');
-    await user.click(screen.getByText('Generated RDF subset'));
+    await user.click(screen.getByText('Generated RDF'));
 
-    expect(screen.getByRole('note').textContent).toContain(
-      'not the complete upstream ontology',
+    expect((await screen.findByRole('note')).textContent).toContain(
+      'complete source RDF',
     );
     expect(screen.getByRole('note').textContent).toContain(
-      'Source-only RDF remains in the reviewed source',
+      'not fetched or executed',
     );
-    expect(screen.getByRole('note').textContent).toContain(
-      'is not executed here',
-    );
-    expect(screen.getByText('Copy generated RDF')).toBeTruthy();
+    expect(document.querySelector('pre')?.textContent).toBe(fakeSource);
+    expect(screen.getByText('Copy complete RDF')).toBeTruthy();
+  });
+
+  it('keeps the catalogue graph available when complete source loading fails', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = input.toString();
+      if (url.endsWith('/catalogue.json')) {
+        return new Response(JSON.stringify(fakeCatalogue), { status: 200 });
+      }
+      if (url.endsWith(fakeCatalogue.entries[0].payloadUrl)) {
+        return new Response(fakePayloadContent, { status: 200 });
+      }
+      if (url.endsWith(fakeCatalogue.entries[0].sourceArtifactUrl!)) {
+        return new Response('source unavailable', { status: 503 });
+      }
+      return new Response('not found', { status: 404 });
+    });
+    const user = userEvent.setup();
+    render(<EmbedWidget config={{
+      catalogueId: 'official/test',
+      theme: 'dark',
+      height: '400px',
+    }} />);
+
+    await screen.findByText('Test Ontology');
+    await user.click(screen.getByText('Generated RDF'));
+
+    await screen.findByText(/Complete RDF source is unavailable/);
+    expect(document.querySelector('pre')?.textContent)
+      .toMatch(/owl:Ontology/);
+    await user.click(screen.getByText('Graph'));
+    expect(screen.getByText('Test Ontology')).toBeTruthy();
+  });
+
+  it('does not pair a rendered payload with a newer catalogue source', async () => {
+    const refreshedSource =
+      '<?xml version="1.0"?><rdf:RDF data-version="new"/>\n';
+    const refreshedSourceHash = createHash('sha256')
+      .update(refreshedSource)
+      .digest('hex');
+    const refreshedCatalogue: Catalogue = {
+      ...fakeCatalogue,
+      entries: [{
+        ...fakeCatalogue.entries[0],
+        sourceArtifactUrl:
+          `catalogue-sources/official/test/${refreshedSourceHash}.rdf`,
+        sourceArtifactHash: `sha256:${refreshedSourceHash}`,
+        sourceArtifactByteLength: new TextEncoder()
+          .encode(refreshedSource).byteLength,
+      }],
+    };
+    let indexRequests = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = input.toString();
+      if (url.endsWith('/catalogue.json')) {
+        indexRequests++;
+        return new Response(JSON.stringify(
+          indexRequests === 1
+            ? fakeCatalogue
+            : refreshedCatalogue,
+        ), { status: 200 });
+      }
+      if (url.endsWith(fakeCatalogue.entries[0].payloadUrl)) {
+        return new Response(fakePayloadContent, { status: 200 });
+      }
+      if (url.endsWith(fakeCatalogue.entries[0].sourceArtifactUrl!)) {
+        return new Response('old source unavailable', { status: 404 });
+      }
+      if (url.endsWith(refreshedCatalogue.entries[0].sourceArtifactUrl!)) {
+        return new Response(refreshedSource, { status: 200 });
+      }
+      return new Response('not found', { status: 404 });
+    });
+    const user = userEvent.setup();
+    render(<EmbedWidget config={{
+      catalogueId: 'official/test',
+      theme: 'dark',
+      height: '400px',
+    }} />);
+
+    await screen.findByText('Test Ontology');
+    await user.click(screen.getByText('Generated RDF'));
+
+    await screen.findByText(/Complete RDF source is unavailable/);
+    expect(document.querySelector('pre')?.textContent)
+      .toMatch(/owl:Ontology/);
+    expect(document.querySelector('pre')?.textContent)
+      .not.toBe(refreshedSource);
+    expect(indexRequests).toBe(1);
   });
 
   it('renders with light theme', async () => {

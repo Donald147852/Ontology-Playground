@@ -74,7 +74,7 @@ const fakePayloads: Record<string, CatalogueEntryPayload> = {
 const fakeSources: Record<string, string> = Object.fromEntries(
   Object.keys(fakePayloads).map((id) => [
     id,
-    `<?xml version="1.0" encoding="UTF-8"?>\n<rdf:RDF data-id="${id}" />\n`,
+    `<?xml version="1.0" encoding="UTF-8"?>\n<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" data-id="${id}" />\n`,
   ]),
 );
 
@@ -578,7 +578,7 @@ describe('GalleryModal', () => {
     )).toBe(false);
   });
 
-  it('labels external graph and generated RDF as a subset', async () => {
+  it('labels external graphs as projections and presents complete RDF', async () => {
     mockFetchSuccess();
     const user = userEvent.setup();
     render(<GalleryModal onClose={onClose} />);
@@ -588,25 +588,22 @@ describe('GalleryModal', () => {
     expect(note.classList.contains('source-fidelity-note')).toBe(true);
     expect(note.querySelector('.lucide-info')).toBeTruthy();
     expect(note.textContent).toContain(
-      'The graph, Designer, and generated RDF use a visual subset',
+      'The graph is a visual projection',
     );
     expect(note.textContent).toContain(
-      'remain intact in the reviewed source',
+      'Designer preserves the complete verified RDF source',
     );
 
     await user.click(screen.getByRole('button', {
-      name: 'View generated RDF for Finance Ledger',
+      name: 'View original RDF source for Finance Ledger',
     }));
 
     expect(await screen.findByText(
-      'Playground-generated RDF subset',
+      'Original reviewed RDF source',
     )).toBeTruthy();
-    expect(screen.getByText(
-      /not the complete upstream ontology/,
-    )).toBeTruthy();
-    expect(screen.getByText(
-      /Source-only RDF remains in the reviewed source/,
-    )).toBeTruthy();
+    expect(document.querySelector('pre')?.textContent).toBe(
+      fakeSources['official/finance-ledger'],
+    );
   });
 
   it('displays entity and relationship counts', async () => {
@@ -658,5 +655,35 @@ describe('GalleryModal', () => {
 
     // onClose should NOT be called (navigation handles unmounting)
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('disables Designer entry for catalogue ontologies above the safe graph limit', async () => {
+    const largeEntry: CatalogueEntry = {
+      ...fakeCatalogue.entries[0],
+      id: 'official/large-ontology',
+      name: 'Large Ontology',
+      entityCount: 1_000,
+      relationshipCount: 0,
+      payloadUrl:
+        `catalogue-payloads/official/large-ontology/${'c'.repeat(64)}.json`,
+      payloadHash: `sha256:${'c'.repeat(64)}`,
+      sourceArtifactUrl:
+        `catalogue-sources/official/large-ontology/${'d'.repeat(64)}.rdf`,
+      sourceArtifactHash: `sha256:${'d'.repeat(64)}`,
+    };
+    mockFetchSuccess({
+      ...fakeCatalogue,
+      count: fakeCatalogue.count + 1,
+      entries: [largeEntry, ...fakeCatalogue.entries],
+    });
+    render(<GalleryModal onClose={onClose} />);
+
+    await screen.findByText('Large Ontology');
+
+    const editButton = screen.getByTitle(
+      'Large Ontology contains 1,000 graph elements, which is too large for safe all-at-once editing. Open it in the catalogue viewer instead.',
+    );
+    expect(editButton).toBeDisabled();
+    expect(window.location.hash).toBe('#/catalogue');
   });
 });

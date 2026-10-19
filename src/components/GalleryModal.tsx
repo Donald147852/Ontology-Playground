@@ -7,6 +7,14 @@ import { serializeToRDF } from '../lib/rdf/serializer';
 import { highlightRdf, RDF_HIGHLIGHT_DARK, RDF_HIGHLIGHT_LIGHT } from '../lib/rdf/highlighter';
 import { SourceFidelityNote } from './SourceFidelityNote';
 import {
+  createCatalogueRdfDocumentReference,
+  ensureRdfDocumentReady,
+} from '../lib/rdf/document';
+import {
+  getDesignerScaleError,
+  getOntologyDesignerScaleError,
+} from '../lib/ontologyScale';
+import {
   loadCatalogueEntry,
   loadCatalogueIndex,
   loadCatalogueSource,
@@ -291,9 +299,72 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
       return;
     }
 
-    loadOntology(loaded.ontology, loaded.bindings, loaded);
-    useDesignerStore.getState().loadDraft(loaded.ontology);
-    navigate({ page: 'designer' });
+    const scaleError = getOntologyDesignerScaleError(
+      loaded.ontology,
+      loaded.name,
+    );
+    if (scaleError) {
+      setPayloadErrors((current) => ({
+        ...current,
+        [entry.id]: scaleError,
+      }));
+      return;
+    }
+
+    const reference = createCatalogueRdfDocumentReference(loaded);
+    if (!reference) {
+      loadOntology(loaded.ontology, loaded.bindings, loaded);
+      useDesignerStore.getState().loadDraft(loaded.ontology);
+      navigate({ page: 'designer' });
+      return;
+    }
+
+    setLoadingSourceIds((current) => new Set(current).add(entry.id));
+    setSourceErrors((current) => {
+      const next = { ...current };
+      delete next[entry.id];
+      return next;
+    });
+    try {
+      const document = await ensureRdfDocumentReady(reference);
+      if (
+        !mountedRef.current
+        || actionId !== latestActionRef.current
+      ) {
+        return;
+      }
+      loadOntology(
+        loaded.ontology,
+        loaded.bindings,
+        loaded,
+        document,
+      );
+      useDesignerStore.getState().loadDraft(
+        loaded.ontology,
+        document,
+      );
+      navigate({ page: 'designer' });
+    } catch (sourceError) {
+      if (
+        mountedRef.current
+        && actionId === latestActionRef.current
+      ) {
+        setSourceErrors((current) => ({
+          ...current,
+          [entry.id]: sourceError instanceof Error
+            ? sourceError.message
+            : 'Failed to load complete RDF source',
+        }));
+      }
+    } finally {
+      if (mountedRef.current) {
+        setLoadingSourceIds((current) => {
+          const next = new Set(current);
+          next.delete(entry.id);
+          return next;
+        });
+      }
+    }
   };
 
   const handleCopyEmbed = (entry: CatalogueEntry) => {
@@ -448,6 +519,10 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
               const isLoadingSource = loadingSourceIds.has(entry.id);
               const isActive = currentOntology.name === entry.name;
               const categoryColor = CATEGORY_COLORS[entry.category] ?? '#6B7280';
+              const designerScaleError = getDesignerScaleError(
+                entry.entityCount + entry.relationshipCount,
+                entry.name,
+              );
               const showGeneratedRdf =
                 rdfView?.id === entry.id
                 && rdfView.kind === 'generated'
@@ -629,10 +704,9 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
 
                   {entry.source === 'external' && (
                     <SourceFidelityNote className="catalogue-source-fidelity-note">
-                      <strong>About this view:</strong> The graph, Designer, and
-                      generated RDF use a visual subset. Source-only SHACL rules
-                      and unsupported triples remain intact in the reviewed
-                      source.
+                      <strong>About this view:</strong> The graph is a visual
+                      projection. Designer preserves the complete verified RDF
+                      source and limits edits to statements it can map exactly.
                     </SourceFidelityNote>
                   )}
 
@@ -675,27 +749,27 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
                           }}
                         >
                           <FileCheck2 size={13} />
-                          {isLoadingSource ? 'Loading…' : 'Original'}
+                          {isLoadingSource ? 'Loading…' : 'Complete RDF'}
                         </button>
                       )}
-                      <button
-                        className="btn btn-secondary"
-                        style={{ padding: '5px 8px', fontSize: 11 }}
-                        title={isLoadingEntry
-                          ? 'Loading ontology payload'
-                          : entry.source === 'external'
-                            ? 'View the Playground-generated RDF subset'
+                      {!hasCatalogueSourceArtifact(entry) && (
+                        <button
+                          className="btn btn-secondary"
+                          style={{ padding: '5px 8px', fontSize: 11 }}
+                          title={isLoadingEntry
+                            ? 'Loading ontology payload'
                             : 'View Playground-generated RDF'}
-                        aria-label={`View generated RDF for ${entry.name}`}
-                        disabled={isLoadingEntry}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void handleViewGeneratedRdf(entry);
-                        }}
-                      >
-                        <Code size={13} />
-                        Generated
-                      </button>
+                          aria-label={`View generated RDF for ${entry.name}`}
+                          disabled={isLoadingEntry}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleViewGeneratedRdf(entry);
+                          }}
+                        >
+                          <Code size={13} />
+                          Generated
+                        </button>
+                      )}
                       <button
                         className="btn btn-secondary"
                         style={{ padding: '5px 8px', fontSize: 11 }}
@@ -710,8 +784,8 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
                       <button
                         className="btn btn-secondary"
                         style={{ padding: '5px 8px', fontSize: 11 }}
-                        title="Edit in Designer"
-                        disabled={isLoadingEntry}
+                        title={designerScaleError ?? 'Edit in Designer'}
+                        disabled={isLoadingEntry || Boolean(designerScaleError)}
                         onClick={(e) => {
                           e.stopPropagation();
                           void handleEditOntology(entry);
